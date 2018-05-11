@@ -1,0 +1,17 @@
+1.Doxygen
+- [install] sudo apt-get install doxygen doxygen-gui
+- [usage] $ doxywizard
+
+2. DoxigenToolkit.vim (https://vim.sourceforge.io/scripts/script.php?script_id=987)
+- [install] 
+	1) download DoxygenToolkit.vim from above 
+		or
+	   use DoxygenToolkit.vim at this directory (note: vim ver.7 needed)
+	2) copy the plugin to ~/.vim/plugin
+- [usage] (command mode in vim) type ":Dox" when a cursor is on the variable/function's name
+
+3. Doxigen generation script (with pre-defined configuration)
+- $./make_doxygen.sh
+- run result/html/index.html
+
+

@@ -1,0 +1,15 @@
+[global]
+ioengine=sync
+thread=1
+group_reporting=1
+direct=1
+verify=0
+time_based=1
+ramp_time=30
+runtime=30
+iodepth=1
+rw=write
+bs=4k
+
+[test]
+numjobs=1

@@ -1,0 +1,110 @@
+
+===================================================================================================================================
+setup.sh option
+	-config : kdd -> udd, param: bdf file or list (list : " ./setup.sh config "0000:0b:00.0 0000:02:00.0")
+	-reset :  udd -> kdd, param: bdf file or list (list :  ./setup.sh reset "0000:0b:00.0 0000:02:00.0")
+	-nvme : display nvme device bdf list among connected pci devices in system
+	-status : display nvme pci bdf list
+		NVMe devices
+		BDF             Numa Node       Driver name             Device name
+		0000:02:00.0    0               nvme                    nvme0
+		0000:0b:00.0    0               uio_pci_generic         -
+		I/OAT DMA
+
+
+root@mountaink-All-Series:/mnt/work/kv_storage/KV_DD/user/spdk/scripts# ./setup.sh status
+NVMe devices
+BDF             Numa Node       Driver name             Device name
+0000:02:00.0    0               nvme                    nvme0
+0000:0b:00.0    0               nvme                    nvme1
+I/OAT DMA
+BDF             Numa Node       Driver Name
+root@mountaink-All-Series:/mnt/work/kv_storage/KV_DD/user/spdk/scripts# ./setup.sh nvme
+BDFs of PCI Device Lists on NVMe ClassID
+0000:02:00.0
+0000:0b:00.0
+root@mountaink-All-Series:/mnt/work/kv_storage/KV_DD/user/spdk/scripts# ./setup.sh config "0000:0b:00.0"
+config on target_bdf:  0000:0b:00.0
+0000:0b:00.0 (144d a808): nvme -> uio_pci_generic
+root@mountaink-All-Series:/mnt/work/kv_storage/KV_DD/user/spdk/scripts# ./setup.sh status
+NVMe devices
+BDF             Numa Node       Driver name             Device name
+0000:02:00.0    0               nvme                    nvme0
+0000:0b:00.0    0               uio_pci_generic         -
+I/OAT DMA
+BDF             Numa Node       Driver Name
+root@mountaink-All-Series:/mnt/work/kv_storage/KV_DD/user/spdk/scripts# ./setup.sh config "0000:0b:00.0 0000:02:00.0"
+config on target_bdf:  0000:0b:00.0 0000:02:00.0
+0000:02:00.0 (144d a808): nvme -> uio_pci_generic
+root@mountaink-All-Series:/mnt/work/kv_storage/KV_DD/user/spdk/scripts# ./setup.sh status
+NVMe devices
+BDF             Numa Node       Driver name             Device name
+0000:02:00.0    0               uio_pci_generic         -
+0000:0b:00.0    0               uio_pci_generic         -
+I/OAT DMA
+BDF             Numa Node       Driver Name
+root@mountaink-All-Series:/mnt/work/kv_storage/KV_DD/user/spdk/scripts# ./setup.sh config
+config all nvme bdf
+root@mountaink-All-Series:/mnt/work/kv_storage/KV_DD/user/spdk/scripts# ./setup.sh status
+NVMe devices
+BDF             Numa Node       Driver name             Device name
+0000:02:00.0    0               uio_pci_generic         -
+0000:0b:00.0    0               uio_pci_generic         -
+I/OAT DMA
+BDF             Numa Node       Driver Name
+root@mountaink-All-Series:/mnt/work/kv_storage/KV_DD/user/spdk/scripts# ./setup.sh reset "0000:02:00.0"
+reset on target_nvme_bdf:  0000:02:00.0
+0000:02:00.0 (144d a808): uio_pci_generic -> nvme
+root@mountaink-All-Series:/mnt/work/kv_storage/KV_DD/user/spdk/scripts# ./setup.sh status
+NVMe devices
+BDF             Numa Node       Driver name             Device name
+0000:02:00.0    0               nvme                    nvme0
+0000:0b:00.0    0               uio_pci_generic         -
+I/OAT DMA
+BDF             Numa Node       Driver Name
+root@mountaink-All-Series:/mnt/work/kv_storage/KV_DD/user/spdk/scripts# ./setup.sh reset
+reset all nvme bdf
+reset: 0000:02:00.0
+reset: 0000:0b:00.0
+0000:0b:00.0 (144d a808): uio_pci_generic -> nvme
+root@mountaink-All-Series:/mnt/work/kv_storage/KV_DD/user/spdk/scripts# ./setup.sh status
+NVMe devices
+BDF             Numa Node       Driver name             Device name
+0000:02:00.0    0               nvme                    nvme0
+0000:0b:00.0    0               nvme                    nvme1
+I/OAT DMA
+BDF             Numa Node       Driver Name
+
+===================================================================================================================================
+
+
+
+
+KV SSD Hot-Plug
+
+KV SSD (SDK / FW / Controller) supports hot-plug functionality. However, the availability of the feature varies on H/W PCI interface and kernel PCI driver. Please refer to figure below.
+
+Firstly, by using lspci command, you can check the availability of a KV SSD on a PCI link.
+
+	lspci –v  (when KV SSD is plugged) 
+	0b:00.0 Non-Volatile memory controller: Samsung Electronics Co Ltd Device a808 (prog-if 02 [NVM Express])
+  Subsystem: Samsung Electronics Co Ltd Device a801
+
+	lspci –v  (when KV SSD is unplugged)
+	0b:00.0 Non-Volatile memory controller: Samsung Electronics Co Ltd Device a808 (rev ff) (prog-if ff)
+
+	Or it could show nothing
+
+
+Next, need to run command below according to SSD unplug/plug event.
+	After Unplug device
+		# echo 1 > /sys/bus/pci/rescan
+		#./setup.sh reset
+	setup.sh is at KV_Host_Release/libs/spdk/scripts
+
+	After Plug device
+		# echo 1 > /sys/bus/pci/rescan
+		#./setup.sh reset
+
+Having done the sequence above, it is able to recognize KV SSD without rebooting system.
+

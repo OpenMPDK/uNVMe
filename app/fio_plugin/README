@@ -1,0 +1,7 @@
+1. Build
+	- build DPDK with "EXTRA_CFLAGS=-fPIC" options (driver/external/dpdk/config/defconfig_x86_64-native-linuxapp-gcc)
+	- build fio (external/fio-2.18)
+	- build driver
+
+2. Sample usage
+	- $ fio Sample_Write.fio

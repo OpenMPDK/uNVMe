@@ -1,0 +1,16 @@
+[global]
+ioengine=./unvme2_fio_plugin
+thread=1
+group_reporting=1
+direct=1
+verify=0
+time_based=0
+ramp_time=0
+runtime=5
+rw=write
+iodepth=128
+bs=4k
+filename=0000.02.00.0
+
+[test]
+numjobs=1

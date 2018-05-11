@@ -1,0 +1,6 @@
+# Debug Binary
+CONFIG_DEBUG=n
+
+# KV NVMe Driver Log Level
+# 1. Error, 2. Warning, 3. Info, 4. Debug
+CONFIG_KVNVME_LOG_LEVEL=3

@@ -1,0 +1,57 @@
+include $(KV_DIR)/mk/kv.dd.mk
+
+KV_LIB = libkvnvmedd.a
+
+LIB = lib_kv_interface.a
+
+C_SRCS = driver.c kv_interface.c kv.c lba.c util.c
+
+DPDK_DIR = dpdk-17.11
+
+all : $(LIB)
+	cp $(KV_DIR)/user/$(DPDK_DIR)/x86_64-native-linuxapp-gcc/lib/librte_eal.a .
+	cp $(KV_DIR)/user/$(DPDK_DIR)/x86_64-native-linuxapp-gcc/lib/librte_mempool.a .
+	cp $(KV_DIR)/user/$(DPDK_DIR)/x86_64-native-linuxapp-gcc/lib/librte_ring.a .
+	cp $(KV_DIR)/user/$(DPDK_DIR)/x86_64-native-linuxapp-gcc/lib/librte_pci.a .
+	cp $(KV_DIR)/user/$(DPDK_DIR)/x86_64-native-linuxapp-gcc/lib/librte_bus_pci.a .
+	cp $(KV_DIR)/user/spdk/build/lib/libspdk_env_dpdk.a .
+	cp $(KV_DIR)/user/spdk/build/lib/libspdk_log.a .
+	cp $(KV_DIR)/user/spdk/build/lib/libspdk_nvme.a .
+	cp $(KV_DIR)/user/spdk/build/lib/libspdk_util.a .
+	ar -x $(LIB)
+	ar -x librte_eal.a
+	ar -x librte_mempool.a
+	ar -x librte_ring.a
+	ar -x librte_pci.a
+	ar -x librte_bus_pci.a
+	mv pci.o pci_bus.o
+	ar -x libspdk_env_dpdk.a
+	ar -x libspdk_log.a
+	ar -x libspdk_nvme.a
+	ar -x libspdk_util.a
+	ar -r $(KV_LIB) *.o
+	rm -f librte_eal.a librte_mempool.a librte_ring.a librte_pci.a librte_bus_pci.a libspdk_env_dpdk.a libspdk_log.a libspdk_nvme.a libspdk_util.a $(LIB)
+	rm -f *.o
+
+clean :
+	rm -f *.a *.o
+
+ifeq ($(DEBUG),y)
+	rm -f $(KV_DIR)/build/debug/lib/$(KV_LIB)
+	rm -f $(KV_DIR)/build/debug/include/*.h
+else
+	rm -f $(KV_DIR)/build/release/lib/$(KV_LIB)
+	rm -f $(KV_DIR)/build/release/include/*.h
+endif
+
+install:
+ifeq ($(DEBUG),y)
+	cp $(KV_LIB) $(KV_DIR)/build/debug/lib/
+	cp $(KV_DIR)/include/* $(KV_DIR)/build/debug/include/
+else
+	cp $(KV_LIB) $(KV_DIR)/build/release/lib/
+	cp $(KV_DIR)/include/* $(KV_DIR)/build/release/include/
+endif
+
+$(LIB) : $(OBJS)
+	$(LIB_C)

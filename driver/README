@@ -1,0 +1,118 @@
+How to build KV UDD : User Level Device Driver based on spdk 
+
+
+1. Pre-Requisites
+==============
+sudo apt-get install -y gcc g++ make libcunit1-dev libaio-dev libssl-dev
+sudo apt-get install xfsprogs
+sudo apt-get install linux-tools-common linux-cloud-tools-4.2.0-16 linux-tools-4.2.0-16 linux-tools-4.2.0-16-generic linux-cloud-tools-4.2.0-16-generic
+sudo su
+
+
+2. Build KV UDD (For developer, need to build DPDK/SPDK prior to build KV UDD)
+==========
+$ make clean
+$ make
+$ make install
+
+3. Build DPDK
+==========
+cd dpdk/
+make install T=x86_64-native-linuxapp-gcc EXTRA_CFLAGS="-fPIC" DESTDIR=. V=99
+
+to build DPDK without -fPIC
+make install T=x86_64-native-linuxapp-gcc DESTDIR=.
+
+to build DPDK 32bit
+make install T=i686-native-linuxapp-gcc EXTRA_CFLAGS="-fPIC" DESTDIR=.
+
+4. Build SPDK
+==========
+cd ../spdk/
+make DPDK_DIR=../dpdk/x86_64-native-linuxapp-gcc
+
+OR to make use of dkdk-17.11
+make DPDK_DIR=../dpdk-17.11/x86_64-native-linuxapp-gcc
+
+
+=================================================================================
+
+Build SPDK Plug-ins
+
+1. RocksDB(db_bench)
+======================
+cd ../rocksdb/
+make db_bench SPDK_DIR=../spdk DPDK_DIR=../dpdk/x86_64-native-linuxapp-gcc
+cd ../spdk/
+
+Prepare a RocksDB Configuration File
+====================================
+mkdir /usr/local/etc/spdk
+cp etc/spdk/rocksdb.conf.in /usr/local/etc/spdk/rocksdb.conf
+scripts/gen_nvme.sh >> /usr/local/etc/spdk/rocksdb.conf
+echo 4096 > /proc/sys/vm/nr_hugepages
+NRHUGE=2560 scripts/setup.sh
+(Output of the command will be for example: 0000:02:00.0 (144d a804): nvme -> uio_pci_generic)
+
+Prepare the BlobFS on the NVMe Device
+=====================================
+test/lib/blobfs/mkfs/mkfs /usr/local/etc/spdk/rocksdb.conf Nvme0n1
+(Output of the command will be for example:
+			Starting DPDK 17.02.0 initialization...
+			[ DPDK EAL parameters: spdk_mkfs -c 0x3 -m 1024 --file-prefix=spdk_pid17091 ]
+			EAL: Detected 8 lcore(s)
+			EAL: No free hugepages reported in hugepages-1048576kB
+			EAL: Probing VFIO support...
+			Occupied cpu socket mask is 0x1
+			EAL: PCI device 0000:02:00.0 on NUMA socket 0
+			EAL:   probe driver: 144d:a804 spdk_nvme
+			Reactor started on core 1 on socket 0
+			Reactor started on core 0 on socket 0
+			Initializing filesystem on bdev Nvme0n1...done.
+)
+
+Run the script that performs RocksDB tests using SPDK
+=====================================================
+./test/blobfs/rocksdb/run_tests.sh ../rocksdb/db_bench
+
+
+
+2. Build fuse FS
+==============
+cd ../libfuse-master
+./makeconf.sh
+./configure
+make
+make install
+
+Build the fuse application in SPDK
+==================================
+cd ../spdk
+make DPDK_DIR=../dpdk/x86_64-native-linuxapp-gcc
+
+To mount the fuse
+=================
+mkdir /mnt/fuse
+echo 4096 > /proc/sys/vm/nr_hugepages
+LD_LIBRARY_PATH=/usr/local/lib/ test/lib/blobfs/fuse/fuse /usr/local/etc/spdk/rocksdb.conf Nvme0n1 /mnt/fuse
+
+Install srandom
+==========
+cd srandom/
+make; sudo make install; sudo make load
+
+
+
+3. Build fio
+========
+
+compile fio
+	1) git clone https://github.com/axboe/fio
+	2) cd fio && git checkout fio-2.21
+	3) make
+
+compile spdk
+	1) ./configure --with-fio=/mnt/work/kv_storage/KV_DD/user/fio --with-dpdk=/mnt/work/kv_storage/KV_DD/user/dpdk/x86_64-native-linuxapp-gcc/ 
+	2) make DPDK_DIR=../dpdk/x86_64-native-linuxapp-gcc/ EXTRA_CFLAGS=-fPIC V=1
+
+

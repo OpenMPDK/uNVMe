@@ -1,0 +1,82 @@
+OpenMPDK (Open Memory Platform Development Kit)
+================================================
+The Open Memory Platform Development Kit (OpenMPDK) will provide proper SW stack of OS and application to enabling solution devices (NVMe SSDs and future solution devices). 
+It will include user level drivers, kernel drivers, sample applications and tools.
+
+The development kit currently includes:
+•	User Level NVMe driver (uNVMe driver). 
+
+uNVMe driver
+uNVMe driver is an user space NVMe driver implemented as a library to which the sample applications can be linked with. Using the SDK, the sample will initialize the NVMe devices, submit and process the I/Os directly to the NVMe devices with a polling mode. It can reduce overhead which are occurred by kernel context switched and I/O handling on interrupt mode and provide optimized performance with lower latency SSD such as NVMe SSDs.
+This release also includes the sample applications and tools for the uNVMe driver. An application will be combined with the uNVMe driver into one process and takes the ownership of a device upon execution and controls the device. An NVMe device can only be accessed by one application at any given time  and an application can access multiple devices simultaneously. The sample applications can control the device using the provided APIs described below.
+
+
+================================================
+Prerequisites
+
+#sudo apt-get install -y gcc g++ make libcunit1-dev libaio-dev libssl-dev check
+#sudo apt-get install xfsprogs
+#sudo apt-get install linux-tools-common linux-cloud-tools-4.2.0-16 linux-tools-4.2.0-16 linux-tools-4.2.0-16-generic linux-cloud-tools-4.2.0-16-generic
+
+In CentOS, some packages like linux-tools-common are not available. Use below commands (Example for CentOS 7 on x86_64):
+# sudo rpm -Uvh http://dl.fedoraproject.org/pub/epel/7/x86_64/Packages/e/epel-release-7-11.noarch.rpm
+# sudo yum update
+# sudo yum install google-perftools google-perftools-devel
+# sudo yum install CUnit-devel openssl-devel gflags-devel libaio-devel check-devel scons
+
+optional libraries
+srandom - fast random generator : https://github.com/josenk/srandom
+libcheck - unit test framework for C : https://github.com/libcheck/check
+
+
+================================================
+Installation
+
+ 
+build dpdk/spdk
+#make.sh intel
+
+
+build OpenMPDK-unvme libuio.a
+#make.sh all (Note: This is identical with ./make.sh driver && ./make.sh io && ./make.sh sdk)
+
+build app
+#make.sh app
+
+
+================================================
+Source tree
+uNVMe
+├── app
+│   ├── external
+│   │   └── fio
+│   └── fio_plugin
+├── driver
+│   ├── build
+│   │   ├── debug
+│   │   └── release
+│   ├── core
+│   ├── external
+│   │   ├── common
+│   │   ├── dpdk
+│   │   └── spdk
+│   ├── include
+│   ├── mk
+│   └── test
+│       ├── command_ut
+│       ├── hash_perf
+│       ├── iterate
+│       ├── iterate_async
+│       ├── udd_perf
+│       └── udd_perf_async
+├── include
+├── io
+│   ├── deps
+│   ├── doxygen
+│   ├── kv_perf_scripts
+│   ├── src
+│   │   ├── common
+│   │   └── slab
+│   └── tests
+└── script
+
