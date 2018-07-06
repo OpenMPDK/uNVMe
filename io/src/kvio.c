@@ -74,8 +74,9 @@ enum {
         op_retrieve = 1,
         op_append = 2,
         op_delete = 3,
+        op_exist = 4,
 }_op_types;
-char *_op_name[4]={"kv_store", "kv_retrieve", "kv_append", "kv_delete"};
+char *_op_name[5]={"kv_store", "kv_retrieve", "kv_append", "kv_delete", "kv_exist"};
 
 typedef struct it_readahead{
 	uint32_t iterator;
@@ -90,7 +91,7 @@ int _kv_check_op_param(uint64_t handle, kv_pair* dst, int op_types){
                 return KV_ERR_SDK_INVALID_PARAM;
         }
 
-        if(op_types!=op_delete){
+        if(op_types!=op_delete && op_types!=op_exist){
                 if(!dst->value.value){
                         fprintf(stderr, "[%s] Invalid Parameter \n", _op_name[op_types]);
                         return KV_ERR_SDK_INVALID_PARAM;
@@ -114,6 +115,11 @@ int _kv_check_op_param(uint64_t handle, kv_pair* dst, int op_types){
                 return KV_ERR_MISALIGNED_VALUE_SIZE;
         }
 
+	if(g_sdk.ssd_type == KV_TYPE_SSD && dst->keyspace_id != KV_KEYSPACE_IODATA && dst->keyspace_id != KV_KEYSPACE_METADATA){
+		fprintf(stderr,"[%s] keyspace should be KV_KEYSPACE_IODATA or KV_KEYSPACE_METADATA\n dst->keyspace_id=%d",__FUNCTION__, dst->keyspace_id);
+		return KV_ERR_SDK_INVALID_PARAM;
+	}
+
         return KV_SUCCESS;
 }
 
@@ -134,6 +140,7 @@ static void sdk_async_store_cb(kv_pair* kv, unsigned int result, unsigned int st
 
         void (*async_cb)() = param->user_async_cb;
         dst->param.private_data = param->user_private_data;
+	dst->keyspace_id = io_kv->keyspace_id;
 
         if(status == KV_SUCCESS){
                 if(g_sdk.use_cache){
@@ -184,8 +191,9 @@ bool context_switch_sync_to_async(int did){
 }
 
 static void copy_kv_pair(kv_pair* dst, kv_pair* src, int op_types){
-        dst->key.length = src->key.length;
-        memcpy(dst->key.key, src->key.key, src->key.length);
+	dst->keyspace_id = src->keyspace_id;
+	dst->key.length = src->key.length;
+	memcpy(dst->key.key, src->key.key, src->key.length);
 
 	switch(op_types){
 		case op_store:
@@ -196,7 +204,14 @@ static void copy_kv_pair(kv_pair* dst, kv_pair* src, int op_types){
 			dst->value.offset = src->value.offset;
 			break;
 		case op_delete:
+			if(g_sdk.ssd_type == LBA_TYPE_SSD){
+				dst->value.length = src->value.length;
+			}
 			dst->value.offset = 0;
+			break;
+		case op_exist:
+			dst->value.offset = 0;
+			break;
 		default:
 			break;
 	}
@@ -205,7 +220,9 @@ static void copy_kv_pair(kv_pair* dst, kv_pair* src, int op_types){
 }
 
 int _kv_store(uint64_t handle, kv_pair* dst){
-        int did, ret = KV_SUCCESS;
+        int did;
+	int ret = KV_SUCCESS;
+	int qid = DEFAULT_IO_QUEUE_ID;
         if((ret = _kv_check_op_param(handle, dst, op_store)) != KV_SUCCESS){
                 goto err;
         }
@@ -225,10 +242,10 @@ int _kv_store(uint64_t handle, kv_pair* dst){
 
 	copy_kv_pair(io_kv, dst, op_store);
 
-	ret = kv_nvme_write(handle, io_kv);
+	ret = kv_nvme_write(handle, qid, io_kv);
 	if(ret == KV_ERR_DD_INVALID_QUEUE_TYPE) {
 		if(context_switch_async_to_sync(did)){
-			ret = kv_nvme_write(handle, io_kv);
+			ret = kv_nvme_write(handle, qid, io_kv);
 		}
 	}
 
@@ -252,7 +269,9 @@ err:
 }
 
 int _kv_store_async(uint64_t handle, kv_pair* dst){
-        int did, ret = KV_SUCCESS;
+        int did;
+	int ret = KV_SUCCESS;
+	int qid = DEFAULT_IO_QUEUE_ID;
         if((ret = _kv_check_op_param(handle, dst, op_store)) != KV_SUCCESS){
                 goto err;
         }
@@ -289,10 +308,10 @@ int _kv_store_async(uint64_t handle, kv_pair* dst){
 
 	ret = KV_ERR_IO;
 	while(ret) {
-		ret = kv_nvme_write_async(handle, io_kv);
+		ret = kv_nvme_write_async(handle, qid, io_kv);
 		if(ret == KV_ERR_DD_INVALID_QUEUE_TYPE) {
 			if(context_switch_sync_to_async(did)){
-				ret = kv_nvme_write_async(handle, io_kv);
+				ret = kv_nvme_write_async(handle, qid, io_kv);
 			}
 			else{
 				slab_free_pair(io_kv);
@@ -302,8 +321,11 @@ int _kv_store_async(uint64_t handle, kv_pair* dst){
 
 		log_debug(KV_LOG_DEBUG, "[kv_nvme_write_async] ret=%d key=%s\n", ret, io_kv->key.key);
 		if(ret){
-			if(g_sdk.ssd_type != LBA_TYPE_SSD) {
-				usleep(g_sdk.polling_interval);
+			if(g_sdk.submit_retry_interval == -1){
+				break;
+			}
+			if(g_sdk.ssd_type == KV_TYPE_SSD){
+				usleep(g_sdk.submit_retry_interval);
 			}
 		}
 		else{
@@ -322,9 +344,12 @@ static void sdk_async_retrieve_cb(kv_pair* kv, unsigned int result, unsigned int
         kv_pair* dst = param->dst;
         void (*async_cb)() = param->user_async_cb;
         dst->param.private_data = param->user_private_data;
+	dst->keyspace_id = io_kv->keyspace_id;
 
         if(status == KV_SUCCESS){
-                dst->value.length = result;
+		if(g_sdk.ssd_type == KV_TYPE_SSD){
+			dst->value.length = result;
+		}
                 memcpy(dst->value.value, io_kv->value.value, dst->value.length);
                 dst->value.offset = io_kv->value.offset;
 
@@ -346,7 +371,10 @@ static void sdk_async_retrieve_cb(kv_pair* kv, unsigned int result, unsigned int
 
 
 int _kv_retrieve(uint64_t handle, kv_pair* dst){
-        int did, ret = KV_SUCCESS;
+        int did;
+	int ret = KV_SUCCESS;
+	int qid = DEFAULT_IO_QUEUE_ID;
+
         if((ret = _kv_check_op_param(handle, dst, op_retrieve)) != KV_SUCCESS){
                 goto err;
         }
@@ -374,10 +402,10 @@ int _kv_retrieve(uint64_t handle, kv_pair* dst){
 
         copy_kv_pair(io_kv, dst, op_retrieve);
 
-	ret = kv_nvme_read(handle, io_kv);
+	ret = kv_nvme_read(handle, qid, io_kv);
 	if(ret == KV_ERR_DD_INVALID_QUEUE_TYPE) {
 		if(context_switch_async_to_sync(did)){
-			ret = kv_nvme_read(handle, io_kv);
+			ret = kv_nvme_read(handle, qid, io_kv);
 		}
 	}
 	log_debug(KV_LOG_DEBUG, "[kv_nvme_read] ret=%d key=%s value=%s\n",ret, io_kv->key.key, io_kv->value.value);
@@ -386,6 +414,7 @@ int _kv_retrieve(uint64_t handle, kv_pair* dst){
 		goto err;
 	}
 
+	dst->keyspace_id = io_kv->keyspace_id;
 	dst->value.length = io_kv->value.length;
 	memcpy(dst->value.value, io_kv->value.value, dst->value.length);
 	dst->value.offset = io_kv->value.offset;
@@ -401,7 +430,10 @@ err:
 }
 
 int _kv_retrieve_async(uint64_t handle, kv_pair* dst){
-        int did, ret = KV_SUCCESS;
+        int did;
+	int ret = KV_SUCCESS;
+	int qid = DEFAULT_IO_QUEUE_ID;
+
         if((ret = _kv_check_op_param(handle, dst, op_retrieve)) != KV_SUCCESS){
                 goto err;
         }
@@ -449,10 +481,10 @@ int _kv_retrieve_async(uint64_t handle, kv_pair* dst){
 
 	ret = KV_ERR_IO;
 	while(ret){
-		ret = kv_nvme_read_async(handle, io_kv);
+		ret = kv_nvme_read_async(handle, qid, io_kv);
 		if(ret == KV_ERR_DD_INVALID_QUEUE_TYPE) {
 			if(context_switch_sync_to_async(did)){
-				ret = kv_nvme_read_async(handle, io_kv);
+				ret = kv_nvme_read_async(handle, qid, io_kv);
 			}
 			else{
 				slab_free_pair(io_kv);
@@ -462,8 +494,11 @@ int _kv_retrieve_async(uint64_t handle, kv_pair* dst){
 
 		log_debug(KV_LOG_DEBUG, "[kv_nvme_read_async] ret=%d key=%s\n", ret, io_kv->key.key);
 		if(ret){
-			if(g_sdk.ssd_type != LBA_TYPE_SSD) {
-				usleep(g_sdk.polling_interval);
+			if(g_sdk.submit_retry_interval == -1){
+				break;
+			}
+			if(g_sdk.ssd_type == KV_TYPE_SSD){
+				usleep(g_sdk.submit_retry_interval);
 			}
 		}
 		else{
@@ -483,6 +518,7 @@ static void sdk_async_delete_cb(kv_pair* kv, unsigned int result, unsigned int s
 
         void (*async_cb)() = param->user_async_cb;
         dst->param.private_data = param->user_private_data;
+	dst->keyspace_id = io_kv->keyspace_id;
 
         if(status == KV_SUCCESS){
                 // do something
@@ -498,7 +534,9 @@ static void sdk_async_delete_cb(kv_pair* kv, unsigned int result, unsigned int s
 }
 
 int _kv_delete(uint64_t handle, kv_pair* dst){
-        int did, ret = KV_SUCCESS;
+        int did;
+	int ret = KV_SUCCESS;
+	int qid = DEFAULT_IO_QUEUE_ID;
 
         if((ret = _kv_check_op_param(handle, dst, op_delete)) != KV_SUCCESS){
                 goto err;
@@ -513,19 +551,35 @@ int _kv_delete(uint64_t handle, kv_pair* dst){
                 goto err;
         }
 
-	ret = kv_nvme_delete(handle, dst);
+	kv_pair* io_kv = slab_alloc_pair(dst->key.length, 0, did); //value.length = 0
+
+        if(!io_kv){
+                ret = KV_ERR_SLAB_ALLOC_FAILURE;
+                fprintf(stderr, "kv_pair slab alloc fail\n");
+                goto err;
+        }
+
+	copy_kv_pair(io_kv, dst, op_delete);
+
+	ret = kv_nvme_delete(handle, qid, io_kv);
 	if(ret == KV_ERR_DD_INVALID_QUEUE_TYPE) {
 		if(context_switch_async_to_sync(did)){
-			ret = kv_nvme_delete(handle, dst);
+			ret = kv_nvme_delete(handle, qid, io_kv);
 		}
 	}
+
+        log_debug(KV_LOG_DEBUG, "[kv_nvme_delete] ret=%d key=%s\n",ret, dst->key.key);
+
+        slab_free_pair(io_kv);
 
 err:
 	return ret;
 }
 
 int _kv_delete_async(uint64_t handle, kv_pair* dst){
-        int did, ret = KV_SUCCESS;
+        int did;
+	int ret = KV_SUCCESS;
+	int qid = DEFAULT_IO_QUEUE_ID;
 
         if((ret = _kv_check_op_param(handle, dst, op_delete)) != KV_SUCCESS){
                 goto err;
@@ -567,10 +621,10 @@ int _kv_delete_async(uint64_t handle, kv_pair* dst){
 
 	ret = KV_ERR_IO;
 	while(ret){
-		ret = kv_nvme_delete_async(handle, io_kv);
+		ret = kv_nvme_delete_async(handle, qid, io_kv);
 		if(ret == KV_ERR_DD_INVALID_QUEUE_TYPE) {
 			if(context_switch_sync_to_async(did)){
-				ret = kv_nvme_delete_async(handle, io_kv);
+				ret = kv_nvme_delete_async(handle, qid, io_kv);
 			}
 			else{
 				slab_free_pair(io_kv);
@@ -579,7 +633,141 @@ int _kv_delete_async(uint64_t handle, kv_pair* dst){
 		}
 		log_debug(KV_LOG_DEBUG, "[kv_nvme_delete_async] ret=%d key=%s\n", ret, dst->key.key);
 		if(ret){
-			usleep(g_sdk.polling_interval);
+			if(g_sdk.submit_retry_interval == -1){
+				break;
+			}
+			if(g_sdk.ssd_type == KV_TYPE_SSD){
+				usleep(g_sdk.submit_retry_interval);
+			}
+		}
+		else{
+			break;
+		}
+	}
+
+err:
+	return ret;
+}
+
+static void sdk_async_exist_cb(kv_pair* kv, unsigned int result, unsigned int status){
+        log_debug(KV_LOG_DEBUG, "[%s] result=%d status=%d key=%s\n", __FUNCTION__, result, status, kv->key.key);
+        sdk_param* param = kv->param.private_data;
+	kv_pair* io_kv = param->src;
+        kv_pair* dst = param->dst;
+
+        void (*async_cb)() = param->user_async_cb;
+        dst->param.private_data = param->user_private_data;
+	dst->keyspace_id = io_kv->keyspace_id;
+
+        if(status == KV_SUCCESS){
+                // do something
+        }
+
+        free(param);
+        param = NULL;
+	slab_free_pair(io_kv);
+
+        if(async_cb){
+                async_cb(dst, result, status);
+        }
+}
+
+int _kv_exist(uint64_t handle, kv_pair* dst){
+        int did;
+	int ret = KV_SUCCESS;
+	int qid = DEFAULT_IO_QUEUE_ID;
+
+        if((ret = _kv_check_op_param(handle, dst, op_exist)) != KV_SUCCESS){
+                goto err;
+        }
+
+        if((did = kv_get_dev_idx_on_handle(handle)) == KV_ERR_SDK_INVALID_PARAM){
+                ret = KV_ERR_SDK_INVALID_PARAM;
+                goto err;
+        }
+
+	kv_pair* io_kv = slab_alloc_pair(dst->key.length, 0, did); //value.length = 0
+
+        if(!io_kv){
+                ret = KV_ERR_SLAB_ALLOC_FAILURE;
+                fprintf(stderr, "kv_pair slab alloc fail\n");
+                goto err;
+        }
+
+        copy_kv_pair(io_kv, dst, op_exist);
+
+	ret = kv_nvme_exist(handle, qid, io_kv);
+	if(ret == KV_ERR_DD_INVALID_QUEUE_TYPE) {
+		if(context_switch_async_to_sync(did)){
+			ret = kv_nvme_exist(handle, qid, io_kv);
+		}
+	}
+
+	slab_free_pair(io_kv);
+
+err:
+	return ret;
+}
+
+int _kv_exist_async(uint64_t handle, kv_pair* dst){
+        int did;
+	int ret = KV_SUCCESS;
+	int qid = DEFAULT_IO_QUEUE_ID;
+
+        if((ret = _kv_check_op_param(handle, dst, op_exist)) != KV_SUCCESS){
+                goto err;
+        }
+
+        if((did = kv_get_dev_idx_on_handle(handle)) == KV_ERR_SDK_INVALID_PARAM){
+                ret = KV_ERR_SDK_INVALID_PARAM;
+                goto err;
+        }
+
+	kv_pair* io_kv = slab_alloc_pair(dst->key.length, 0, did); //value.length = 0
+
+	if(!io_kv){
+		ret = KV_ERR_SLAB_ALLOC_FAILURE;
+		fprintf(stderr, "kv_pair slab alloc fail\n");
+		goto err;
+	}
+
+	copy_kv_pair(io_kv, dst, op_exist);
+
+	sdk_param* param = malloc(sizeof(sdk_param));
+	if(!param){
+		ret = KV_ERR_HEAP_ALLOC_FAILURE;
+		fprintf(stderr, "[kv_nvme_exist_async]sdk_param malloc err\n");
+		slab_free_pair(io_kv);
+		goto err;
+	}
+	param->src = io_kv;
+	param->dst = dst;
+	param->user_async_cb = dst->param.async_cb;
+	param->user_private_data = dst->param.private_data;
+
+	io_kv->param.async_cb = sdk_async_exist_cb;
+	io_kv->param.private_data = param;
+
+	ret = KV_ERR_IO;
+	while(ret){
+		ret = kv_nvme_exist_async(handle, qid, io_kv);
+		if(ret == KV_ERR_DD_INVALID_QUEUE_TYPE) {
+			if(context_switch_sync_to_async(did)){
+				ret = kv_nvme_exist_async(handle, qid, io_kv);
+			}
+			else{
+				slab_free_pair(io_kv);
+				goto err;
+			}
+		}
+		log_debug(KV_LOG_DEBUG, "[kv_nvme_exist_async] ret=%d key=%s\n", ret, dst->key.key);
+		if(ret){
+			if(g_sdk.submit_retry_interval == -1){
+				break;
+			}
+			if(g_sdk.ssd_type == KV_TYPE_SSD){
+				usleep(g_sdk.submit_retry_interval);
+			}
 		}
 		else{
 			break;
@@ -618,6 +806,7 @@ static void sdk_async_iterate_read_cb(kv_iterate* it, unsigned int result, unsig
         kv_iterate* dst = param->dst;
         void (*async_cb)() = param->user_async_cb;
         dst->kv.param.private_data = param->user_private_data;
+	dst->kv.keyspace_id = io_it->kv.keyspace_id;
 	uint64_t handle = param->handle;
 
 #ifdef  USE_ITERATE_PREPATCH
@@ -718,6 +907,7 @@ finalize:
 }
 
 int _kv_iterate_read_async(uint64_t handle, kv_iterate* dst){
+	int qid = DEFAULT_IO_QUEUE_ID;
 	int ret = KV_SUCCESS;
 	if((ret = _kv_check_iterate_param(handle, dst)) != KV_SUCCESS){
 		dst->kv.value.length = 0;
@@ -740,6 +930,7 @@ int _kv_iterate_read_async(uint64_t handle, kv_iterate* dst){
 	}
 
         io_it->iterator = dst->iterator;
+	io_it->kv.keyspace_id = 0; //NOTE : keyspace_id is zero on iterate_read_request
 	io_it->kv.key.length = 0;
 	io_it->kv.value.length = ssd_it_read_size;
         io_it->kv.value.offset = 0;
@@ -764,10 +955,10 @@ int _kv_iterate_read_async(uint64_t handle, kv_iterate* dst){
 
 	ret = KV_ERR_IO;
 	while(ret) {
-		ret = kv_nvme_iterate_read_async(handle, io_it);
+		ret = kv_nvme_iterate_read_async(handle, qid, io_it);
 		if(ret == KV_ERR_DD_INVALID_QUEUE_TYPE) {
 			if(context_switch_sync_to_async(did)){
-				ret = kv_nvme_iterate_read_async(handle, io_it);
+				ret = kv_nvme_iterate_read_async(handle, qid, io_it);
 			}
 			else{
 				slab_free_iterate(io_it);
@@ -777,7 +968,10 @@ int _kv_iterate_read_async(uint64_t handle, kv_iterate* dst){
 
 		log_debug(KV_LOG_DEBUG, "[%s] submit done. ret=%d iterator id=%d dst->value.length=%d\n", __FUNCTION__, ret, io_it->iterator, dst->kv.value.length);
 		if(ret){
-			usleep(g_sdk.polling_interval);
+			if(g_sdk.submit_retry_interval == -1){
+				break;
+			}
+			usleep(g_sdk.submit_retry_interval);
 		}
 		else{
 			break;
@@ -792,6 +986,7 @@ err:
 
 int _kv_iterate_read(uint64_t handle, kv_iterate* dst){
 	int ret = KV_SUCCESS;
+	int qid = DEFAULT_IO_QUEUE_ID;
 	if((ret = _kv_check_iterate_param(handle, dst)) != KV_SUCCESS){
 		dst->kv.value.length = 0;
 		goto err;
@@ -816,6 +1011,7 @@ int _kv_iterate_read(uint64_t handle, kv_iterate* dst){
         }
 
         io_it->iterator = dst->iterator;
+	io_it->kv.keyspace_id = 0; //Note : keyspace_id is zero on iterate_read request
         io_it->kv.value.offset = 0;
         memcpy((char*)&io_it->kv.param,(char*)&dst->kv.param,sizeof(kv_param));
 
@@ -852,10 +1048,10 @@ int _kv_iterate_read(uint64_t handle, kv_iterate* dst){
 #else
 	io_it->kv.key.length = 0;
 	io_it->kv.value.length = ssd_it_read_size;
-	ret = kv_nvme_iterate_read(handle, io_it);
+	ret = kv_nvme_iterate_read(handle, qid, io_it);
 	if(ret == KV_ERR_DD_INVALID_QUEUE_TYPE) {
 		if(context_switch_async_to_sync(did)){
-			ret = kv_nvme_iterate_read(handle, io_it);
+			ret = kv_nvme_iterate_read(handle, qid, io_it);
 		}
 	}
 
@@ -867,6 +1063,7 @@ int _kv_iterate_read(uint64_t handle, kv_iterate* dst){
 		goto err;
 	}
 
+	dst->kv.keyspace_id = io_it->kv.keyspace_id;
 	dst->kv.key.length = io_it->kv.key.length;
 	if(dst->kv.key.length > 0 && dst->kv.key.key != NULL){
 		memcpy(dst->kv.key.key, io_it->kv.value.value, dst->kv.key.length);
@@ -891,12 +1088,12 @@ err:
         return ret;
 }
 
-uint32_t _kv_iterate_open(uint64_t handle, const uint32_t bitmask, const uint32_t prefix, const uint8_t iterate_type){
+uint32_t _kv_iterate_open(uint64_t handle, const uint8_t keyspace_id, const uint32_t bitmask, const uint32_t prefix, const uint8_t iterate_type){
 	uint32_t iterator = KV_INVALID_ITERATE_HANDLE;
 	while(1) {
-		iterator = kv_nvme_iterate_open(handle, bitmask, prefix, iterate_type);
+		iterator = kv_nvme_iterate_open(handle, keyspace_id, bitmask, prefix, iterate_type);
 		if (iterator == KV_ERR_DD_NO_AVAILABLE_RESOURCE) {
-			usleep(g_sdk.polling_interval);
+			usleep(g_sdk.submit_retry_interval);
 		}
 		else {
 			break;
@@ -910,7 +1107,7 @@ int _kv_iterate_close(uint64_t handle, const uint8_t iterator){
 	while(1) {
                 ret = kv_nvme_iterate_close(handle, iterator);
                 if (ret == KV_ERR_DD_NO_AVAILABLE_RESOURCE) {
-                        usleep(g_sdk.polling_interval);
+			usleep(g_sdk.submit_retry_interval);
                 }
                 else {
                         break;
@@ -920,6 +1117,8 @@ int _kv_iterate_close(uint64_t handle, const uint8_t iterator){
 }
 
 int _kv_append(uint64_t handle, kv_pair *kv){
+	return KV_ERR_DD_UNSUPPORTED_CMD;
+	/*
         int ret = KV_SUCCESS;
         if((ret = _kv_check_op_param(handle, kv, op_append)) != KV_SUCCESS){
                 goto err;
@@ -948,4 +1147,5 @@ int _kv_append(uint64_t handle, kv_pair *kv){
 
 err:
         return ret;
+	*/
 }

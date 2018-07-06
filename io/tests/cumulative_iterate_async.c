@@ -38,18 +38,16 @@ typedef struct {
 
 // thread variables
 unsigned int* g_store_complete_count;
-unsigned int* g_retrieve_complete_count;
-unsigned int* g_delete_complete_count;
-unsigned int* g_iterate_read_complete_count;
+unsigned int g_iterate_read_complete_count[KV_MAX_ITERATE_HANDLE];
 
-int* submitted_num_cmd;
-long* total_time;
-int* num_read_key;
-pthread_mutex_t* mutex_eof_flag;
-int* eof_flag;
+int g_submitted_num_cmd[KV_MAX_ITERATE_HANDLE];
+int g_num_read_key[KV_MAX_ITERATE_HANDLE];
+long* g_total_time;
+pthread_mutex_t* g_mutex_eof_flag;
+int* g_eof_flag;
 struct timeval* g_end;
 
-int nr_it_handle = 1;
+int g_nr_it_handle = 1;
 
 // global variables
 int nthreads = 0;
@@ -70,7 +68,7 @@ kv_iterate** it;
 void myalarm() {
 	int i;
 	for (i = 0; i < nthreads; i++) {
-		fprintf(stdout, "    [tid=%d]num_read_key=%d, submit_count=%d, complete_count=%d\n", i, num_read_key[i], submitted_num_cmd[i], g_iterate_read_complete_count[i]);
+		fprintf(stdout, "    [tid=%d]num_read_key=%d, submit_count=%d, complete_count=%u\n", i, g_num_read_key[i], g_submitted_num_cmd[i], g_iterate_read_complete_count[i]);
 	}
 	fprintf(stdout, "\n");
         fflush(stdout);
@@ -92,28 +90,28 @@ void async_iterate_read_cb(kv_iterate* it, unsigned int result, unsigned int sta
 
 	// async callback completion sequence validation logic
 	if (status == KV_ERR_ITERATE_READ_EOF) {
-		pthread_mutex_lock(&mutex_eof_flag[stamp->tid]);
+		pthread_mutex_lock(&g_mutex_eof_flag[stamp->tid]);
 
-		// when first eof read, check it to eof_flag
-		if (!eof_flag[stamp->tid]) {
-			eof_flag[stamp->tid] = 1;
+		// when first eof read, check it to g_eof_flag
+		if (!g_eof_flag[stamp->tid]) {
+			g_eof_flag[stamp->tid] = 1;
 			gettimeofday(&g_end[stamp->tid], NULL);
 			fprintf(stdout, "    [EOF]    \n");
 		}
-		pthread_mutex_unlock(&mutex_eof_flag[stamp->tid]);
+		pthread_mutex_unlock(&g_mutex_eof_flag[stamp->tid]);
 	}
 
 //	fprintf(stdout, "[%dth / %d] Iterate Read Result: , it->value.length=%d status=%d\n\n", ((struct time_stamps*)(it->kv.param.private_data))->cmd_order, submitted_num_cmd, it->kv.value.length, status);
 	gettimeofday(&stamp->end, NULL);
-	pthread_mutex_lock(&mutex_eof_flag[stamp->tid]);
+	pthread_mutex_lock(&g_mutex_eof_flag[stamp->tid]);
 	if (it->kv.value.length > 0) {
 		if(it->kv.key.length == 0) {
-			num_read_key[stamp->tid] += it->kv.value.length / 16;
+			g_num_read_key[stamp->tid] += it->kv.value.length / 16;
 		} else {
-			num_read_key[stamp->tid]++;
+			g_num_read_key[stamp->tid]++;
 		}
 	}
-	pthread_mutex_unlock(&mutex_eof_flag[stamp->tid]);
+	pthread_mutex_unlock(&g_mutex_eof_flag[stamp->tid]);
 
 	g_iterate_read_complete_count[stamp->tid]++;
 }
@@ -146,6 +144,7 @@ void prepare_app_memory(int nthreads) {
 		kv[i] = (kv_pair*) malloc(sizeof(kv_pair));
 		fail_unless(kv[i] != NULL);
 
+		kv[i]->keyspace_id = KV_KEYSPACE_IODATA;
 		kv[i]->key.key = malloc(key_length + 1);
 		fail_unless(kv[i]->key.key != NULL);
 		kv[i]->key.length = key_length;
@@ -186,23 +185,13 @@ void prepare_app_memory(int nthreads) {
 
 	g_store_complete_count = (int*)calloc(nthreads, sizeof(int));
 	fail_unless(g_store_complete_count != NULL);
-	g_retrieve_complete_count = (int*)calloc(nthreads, sizeof(int));
-	fail_unless(g_retrieve_complete_count != NULL);
-	g_delete_complete_count = (int*)calloc(nthreads, sizeof(int));
-	fail_unless(g_delete_complete_count != NULL);
-	g_iterate_read_complete_count = (int*)calloc(nthreads, sizeof(int));
-	fail_unless(g_iterate_read_complete_count != NULL);
 
-	submitted_num_cmd = (int*)calloc(nthreads, sizeof(int));
-	fail_unless(submitted_num_cmd);
-	total_time = (long*)calloc(nthreads, sizeof(long));
-	fail_unless(total_time);
-	num_read_key = (int*)calloc(nthreads, sizeof(int));
-	fail_unless(num_read_key);
-	mutex_eof_flag = (pthread_mutex_t*)calloc(nthreads, sizeof(pthread_mutex_t));
-	fail_unless(mutex_eof_flag);
-	eof_flag = (int*)calloc(nthreads, sizeof(int));
-	fail_unless(eof_flag);
+	g_total_time = (long*)calloc(nthreads, sizeof(long));
+	fail_unless(g_total_time);
+	g_mutex_eof_flag = (pthread_mutex_t*)calloc(nthreads, sizeof(pthread_mutex_t));
+	fail_unless(g_mutex_eof_flag);
+	g_eof_flag = (int*)calloc(nthreads, sizeof(int));
+	fail_unless(g_eof_flag);
 	g_end = (struct timeval*)calloc(nthreads, sizeof(struct timeval));
 	fail_unless(g_end);
 }
@@ -230,15 +219,10 @@ void teardown_memory(int nthreads) {
 	if (it) free(it);
 
 	if(g_store_complete_count) free(g_store_complete_count);
-	if(g_retrieve_complete_count) free(g_retrieve_complete_count);
-	if(g_delete_complete_count) free(g_delete_complete_count);
-	if(g_iterate_read_complete_count) free(g_iterate_read_complete_count);
 
-	if(submitted_num_cmd) free(submitted_num_cmd);
-	if(total_time) free(total_time);
-	if(num_read_key) free(num_read_key);
-	if(mutex_eof_flag) free(mutex_eof_flag);
-	if(eof_flag) free(eof_flag);
+	if(g_total_time) free(g_total_time);
+	if(g_mutex_eof_flag) free(g_mutex_eof_flag);
+	if(g_eof_flag) free(g_eof_flag);
 	if(g_end) free(g_end);
 }
 
@@ -294,13 +278,14 @@ void* sdk_iterate(void* data) {
 
 	uint32_t bitmask = 0xFFFFFFFF;
 	uint32_t prefix = 0;
+	uint8_t keyspace_id = KV_KEYSPACE_IODATA;
 	char tmp_prefix[5] ={""};
 	sprintf(tmp_prefix, "%04x", tid);
 	memcpy(&prefix, tmp_prefix, sizeof(uint32_t));
 	uint32_t iterator = KV_INVALID_ITERATE_HANDLE;
-	fprintf(stdout, "[tid=%d]Iterate Open : bitmask=%x bit_pattern=%x\n", tid, bitmask, prefix);
+	fprintf(stdout, "[tid=%d]Iterate Open : keyspace_id=%d bitmask=%x bit_pattern=%x\n", tid, keyspace_id, bitmask, prefix);
 
-	iterator = kv_iterate_open(handle, bitmask, prefix, iterate_type);
+	iterator = kv_iterate_open(handle, keyspace_id, bitmask, prefix, iterate_type);
 	if (iterator != KV_INVALID_ITERATE_HANDLE) {
 		fprintf(stdout, "[tid=%d]Iterate open success : iterator id=%d\n", tid, iterator);
 ITER_READ_PART:
@@ -316,20 +301,20 @@ ITER_READ_PART:
 		for (i = 0 + (tid * iterate_read_count); i < iterate_read_count + (tid * iterate_read_count); i++) {
 			//fprintf(stderr, "Iterate Read Request=%d\n", it[i]->value.length);
 			ret = kv_iterate_read_async(handle, it[i]);
-			submitted_num_cmd[tid]++;
+			g_submitted_num_cmd[tid]++;
 		}
 
 		while (g_iterate_read_complete_count[tid] < iterate_read_count) {
 			usleep(1);
 		}
 		gettimeofday(param->t_end, NULL);
-		if (eof_flag[tid] == 0) {
-			submitted_num_cmd[tid] = 0;
-			total_time[tid] += ((param->t_end->tv_sec - param->t_start->tv_sec) * 1000000) + param->t_end->tv_usec - param->t_start->tv_usec;
+		if (g_eof_flag[tid] == 0) {
+			g_submitted_num_cmd[tid] = 0;
+			g_total_time[tid] += ((param->t_end->tv_sec - param->t_start->tv_sec) * 1000000) + param->t_end->tv_usec - param->t_start->tv_usec;
 			g_iterate_read_complete_count[tid] = 0;
 			goto ITER_READ_PART;
 		}
-		total_time[tid] += ((g_end[tid].tv_sec - param->t_start->tv_sec) * 1000000) + g_end[tid].tv_usec - param->t_start->tv_usec;
+		g_total_time[tid] += ((g_end[tid].tv_sec - param->t_start->tv_sec) * 1000000) + g_end[tid].tv_usec - param->t_start->tv_usec;
 
 		kv_iterate_close(handle, iterator);
 	}
@@ -364,7 +349,7 @@ int sdk_iterate_async(void) {
 	memset(&sdk_opt, 0, sizeof(kv_sdk));
 	strcpy(sdk_opt.dev_id[0], "0000:02:00.0");
 	sdk_opt.dd_options[0].core_mask = 0x0;
-	for(i = 0; i < nr_it_handle; i++) {
+	for(i = 0; i < g_nr_it_handle; i++) {
 		sdk_opt.dd_options[0].core_mask |= (1 << i);
 	}
 	sdk_opt.dd_options[0].cq_thread_mask = 0x80;
@@ -425,8 +410,8 @@ int sdk_iterate_async(void) {
 	if (ret == KV_SUCCESS) {
 		printf("iterate_handle count=%d\n", nr_iterate_handle);
 		for (i = 0; i < nr_iterate_handle; i++) {
-			printf("iterate_handle_info[%d] : info.handle_id=%d info.status=%d info.type=%d info.prefix=%08x info.bitmask=%08x\n",
-					i + 1, info[i].handle_id, info[i].status, info[i].type, info[i].prefix, info[i].bitmask);
+			printf("iterate_handle_info[%d] : info.handle_id=%d info.status=%d info.type=%d info.prefix=%08x info.bitmask=%08x info.is_eof=%d\n",
+					i + 1, info[i].handle_id, info[i].status, info[i].type, info[i].prefix, info[i].bitmask, info[i].is_eof);
 			if (info[i].status == ITERATE_HANDLE_OPENED) {
 				printf("close iterate_handle : %d\n", info[i].handle_id);
 				kv_iterate_close(arr_handle[0], info[i].handle_id);
@@ -448,7 +433,7 @@ int sdk_iterate_async(void) {
 
 	FILE* fp = fopen("result_async.txt", "a");
 	for (i = 0; i < nthreads; i++) {
-		fprintf(fp, "% 12d   % 11ld    ", num_read_key[i], total_time[i]/1000);
+		fprintf(fp, "% 12d   % 11ld    ", g_num_read_key[i], g_total_time[i]/1000);
 	}
 	fprintf(fp, "\n");
 	fclose(fp);
@@ -479,8 +464,8 @@ int main(int argc, char** argv) {
 		start_point = atoi(argv[1]);
 	}
 	if (argc > 2) {
-		nr_it_handle = atoi(argv[2]);
-		if(nr_it_handle < 1 || nr_it_handle > 7) {
+		g_nr_it_handle = atoi(argv[2]);
+		if(g_nr_it_handle < 1 || g_nr_it_handle > 7) {
 			fprintf(stderr, "FAIL: invalid it_handle range");
 			exit(1);
 		}

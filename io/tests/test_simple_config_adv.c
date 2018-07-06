@@ -253,9 +253,10 @@ int simple_ut() {
 		kv[i] = (kv_pair*) malloc(sizeof(kv_pair));
 		assert(kv[i]);
 		kv[i]->key.length = key_length;
-		kv[i]->key.key = malloc(key_length);
+		kv[i]->key.key = malloc(key_length + 1);
 		assert(kv[i]->key.key);
 		sprintf(kv[i]->key.key, "mou%012d", i);
+		kv[i]->keyspace_id = KV_KEYSPACE_IODATA;
 
 		kv[i]->value.value = malloc(value_size);
 		assert(kv[i]->value.value);

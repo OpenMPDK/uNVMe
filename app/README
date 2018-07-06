@@ -1,0 +1,103 @@
+How to Run the Sample Applications
+==================================
+
+Pre-Requisites
+==============
+Make sure the NVMe device which is to be used is properly formatted.
+NVMe devices can be formatted using the "**nvme**" cli utility using the Linux inbox kernel driver.
+
+To do the formatting of the devices, please execute the following commands
+
+From the uNVMe SDK home directory, navigate to the SPDK directory
+
+	cd driver/external/spdk
+
+Install the Linux inbox kernel driver
+
+	./scripts/setup.sh reset
+
+Format the NVMe device (select the correct NVMe device among the list of NVMe devices)
+Assuming the NVMe device to be used is the first NVMe device,
+
+	nvme format --ses=1 /dev/nvme0n1
+
+After the NVMe device is formatted, uninstall the inbox kernel driver and setup the hugepages in the system.
+
+Hugepages have to be setup as the uNVMe performs DMA IO effectively with less paging overhead, taking advantage of Intel DPDK/SPDK nature.
+
+The number of hugepages should be reserved based on the application's requirements. In the example, we are reserving 4096 hugepages,
+
+which implies 8GB DRAM reservation as one hugepages would occupy 2MB in size.
+
+	NRHUGE=4096 ./scripts/setup.sh
+
+Note: We need to check a possible DRAM size for hugepage reservation in your system, and properly set application's hugememory size with 'app_hugemem_size' option of configuration.
+
+
+1. mkfs
+=======
+mkfs application is used to prepare a BlobFS filesystem on the NVMe device to be used.
+
+After the uNVMe SDK source code is built, from the home directory, navigate to app/mkfs directory.
+
+	cd app/mkfs
+
+Modify the `lba_sdk_config.json` to contain the BDF of the NVMe device to be used.
+
+Execute the following command,
+
+	./mkfs unvme_bdev0n1 ./lba_sdk_config.json
+
+blobFS is prepared as devices order of configuration file.
+  ex) ./mkfs unvme_bdev0n1 ./lba_sdk_config.json > prepare a blobFS on "first" device of lba_sdk_config.json 
+  ex) ./mkfs unvme_bdev2n1 ./lba_sdk_config.json > prepare a blobFS on "third" device of lba_sdk_config.json 
+
+2. RocksDB(db_bench)
+====================
+After the uNVMe SDK source code is built, from the home directory, navigate to app/unvme_rocksdb directory.
+
+	cd app/unvme_rocksdb
+
+Modify the `dev_id` of `lba_sdk_config.json` to contain the BDF of the NVMe device to be used.
+
+Run the script that performs RocksDB sample workload tests (Assuming the first NVMe device)
+
+	./run_tests.sh ./db_bench
+
+The script file can be modified based on the workload requirements.
+
+3. Fuse
+=======
+Fuse application is used to mount the BlobFS filesystem present on the NVMe device to a mount point in the system.
+
+To use the Fuse application, libfuse has to be installed in the system.
+
+To install libfuse, please follow the instructions present in the link
+
+	https://github.com/libfuse/libfuse/
+
+After the libfuse is built and installed, the libfuse3.so will be present at the following location in the system
+
+    /usr/local/lib/x86_64-linux-gnu/libfuse3.so
+(Please verify if the path for the libfuse3.so is the same as mentioned above. If the path is different, it has to be used accordingly)
+
+The uNVMe SDK source code needs to be rebuilt after the libfuse installation.
+
+After the uNVMe SDK source code is built, from the home directory, navigate to app/fuse directory.
+
+	cd app/fuse
+
+Modify the `dev_id` of `lba_sdk_config.json` to contain the BDF of the NVMe device to be used.
+
+Execute the following command,
+
+	LD_LIBRARY_PATH=/usr/local/lib/x86_64-linux-gnu/ ./fuse unvme_bdev0n1 ./lba_sdk_config.json /mnt/fuse
+
+Fuse application will be waiting for the Ctrl+C signal on the current terminal.
+
+In the other terminal, the contents of the /mnt/fuse can be checked by executing the following command
+
+	ls /mnt/fuse
+
+Note : Like mkfs, fuse also follows devices order of configuration file. Therefore, mismatch of devices’ order of configurations files between mkfs and fuse may cause mount error.
+Note : The Rocksdb(db_bench), Fuse, and Mkfs work for LBA SSD at the moment. (Not for Samsung KV SSD)

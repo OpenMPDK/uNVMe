@@ -23,6 +23,11 @@
 #define MAX(a, b)   ((a) > (b) ? (a) : (b))
 #define NELEM(a)    ((sizeof(a)) / sizeof((a)[0]))
 
+#define KV_MEM_ALIGN(d, n)      ((size_t)(((d) + (n - 1)) & ~(n - 1)))
+#define KV_PTR_ALIGN(p, n)  \
+    (void *) (((uintptr_t) (p) + ((uintptr_t) n - 1)) & ~((uintptr_t) n - 1))
+
+
 #ifndef KB
 #define KB	(1024)
 #endif
@@ -32,7 +37,7 @@
 #endif
 
 #ifndef GB
-#define GB	(1024 * GB)
+#define GB	(1024 * MB)
 #endif
 
 enum hash_{

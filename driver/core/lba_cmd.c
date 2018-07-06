@@ -60,7 +60,7 @@ static void _lba_async_io_complete(void *arg, const struct spdk_nvme_cpl *comple
         kv = (kv_pair *)arg;
 
         status = completion->status.sc;
-        result = completion->cdw0;
+        result = completion->status.sct;
 
         KVNVME_DEBUG("Status of the Async I/O: %d, Result of the Async I/O: %d, kv->key.key: %s", status, result, (char *)kv->key.key);
 
@@ -106,11 +106,11 @@ int _lba_nvme_write(kv_nvme_t *nvme, const kv_pair *kv, int core_id, uint8_t is_
         KVNVME_DEBUG("Complete Key ID: %s, Dissected Key ID: %s, LBA Offset: 0x%llx", key_id, sub_key_id, (unsigned long long)lba);
 
 
-        pthread_spin_lock(&qpair->q_lock);
+        pthread_spin_lock(&qpair->sq_lock);
         ret = spdk_nvme_ns_cmd_write(nvme->ns, qpair, buffer, lba, (kv->value.length / nvme->sector_size), _lba_io_complete, &io_sequence, 0);
 
         if(ret) {
-                pthread_spin_unlock(&qpair->q_lock);
+                pthread_spin_unlock(&qpair->sq_lock);
                 KVNVME_ERR("Error in Performing Write on the LBA Type SSD");
                 LEAVE();
                 return ret;
@@ -119,7 +119,7 @@ int _lba_nvme_write(kv_nvme_t *nvme, const kv_pair *kv, int core_id, uint8_t is_
         while(!io_sequence.is_completed) {
                 spdk_nvme_qpair_process_completions(qpair, 0);
         }
-        pthread_spin_unlock(&qpair->q_lock);
+        pthread_spin_unlock(&qpair->sq_lock);
 
         KVNVME_DEBUG("Result of the I/O: %d, Status of the I/O: %d", io_sequence.result, io_sequence.status);
 
@@ -159,12 +159,9 @@ int _lba_nvme_write_async(kv_nvme_t *nvme, const kv_pair *kv, int core_id) {
 
         KVNVME_DEBUG("Complete Key ID: %s, Dissected Key ID: %s, LBA Offset: 0x%llx", key_id, sub_key_id, (unsigned long long)lba);
 
-        pthread_spin_lock(&qpair->q_lock);
+        pthread_spin_lock(&qpair->sq_lock);
         ret = spdk_nvme_ns_cmd_write(nvme->ns, qpair, buffer, lba, (kv->value.length / nvme->sector_size), _lba_async_io_complete, (void *)kv, 0);
-        if(ret == -ENOMEM){
-		spdk_nvme_qpair_process_completions(qpair, 0);
-        }
-        pthread_spin_unlock(&qpair->q_lock);
+        pthread_spin_unlock(&qpair->sq_lock);
         LEAVE();
         return ret;
 }
@@ -202,11 +199,11 @@ int _lba_nvme_read(kv_nvme_t *nvme, kv_pair* kv, int core_id) {
 
         KVNVME_DEBUG("Complete Key ID: %s, Dissected Key ID: %s, LBA Offset: 0x%llx", key_id, sub_key_id, (unsigned long long)lba);
 
-        pthread_spin_lock(&qpair->q_lock);
+        pthread_spin_lock(&qpair->sq_lock);
         ret = spdk_nvme_ns_cmd_read(nvme->ns, qpair, buffer, lba, (kv->value.length / nvme->sector_size), _lba_io_complete, &io_sequence, 0);
 
         if(ret) {
-                pthread_spin_unlock(&qpair->q_lock);
+                pthread_spin_unlock(&qpair->sq_lock);
                 KVNVME_ERR("Error in Performing Read on the LBA Type SSD");
                 LEAVE();
                 return ret;
@@ -215,7 +212,7 @@ int _lba_nvme_read(kv_nvme_t *nvme, kv_pair* kv, int core_id) {
         while(!io_sequence.is_completed) {
                 spdk_nvme_qpair_process_completions(qpair, 0);
         }
-        pthread_spin_unlock(&qpair->q_lock);
+        pthread_spin_unlock(&qpair->sq_lock);
 
         KVNVME_DEBUG("Result of the I/O: %d, Status of the I/O: %d", io_sequence.result, io_sequence.status);
 
@@ -256,18 +253,114 @@ int _lba_nvme_read_async(kv_nvme_t *nvme, kv_pair *kv, int core_id) {
 
         KVNVME_DEBUG("Complete Key ID: %s, Dissected Key ID: %s, LBA Offset: 0x%llx", key_id, sub_key_id, (unsigned long long)lba);
 
-        pthread_spin_lock(&qpair->q_lock);
+        pthread_spin_lock(&qpair->sq_lock);
         ret = spdk_nvme_ns_cmd_read(nvme->ns, qpair, buffer, lba, (kv->value.length / nvme->sector_size), _lba_async_io_complete, (void *)kv, 0);
-        if(ret == -ENOMEM){
-		spdk_nvme_qpair_process_completions(qpair, 0);
-        }
-        pthread_spin_unlock(&qpair->q_lock);
+        pthread_spin_unlock(&qpair->sq_lock);
 
         LEAVE();
         return ret;
 }
 
-int _lba_nvme_format(kv_nvme_t *nvme) {
+int _lba_nvme_delete(kv_nvme_t *nvme, const kv_pair *kv, int core_id) {
+	int ret = KV_ERR_DD_INVALID_PARAM;
+	struct spdk_nvme_qpair *qpair = NULL;
+	nvme_cmd_sequence_t io_sequence = {0};
+	uint64_t lba = 0;
+	char *key_id = NULL;
+	char sub_key_id[LBA_SSD_KEY_ID_SIZE];
+	struct spdk_nvme_dsm_range dsm_range;
+
+	ENTER();
+
+	if(!kv || !kv->key.key) {
+		KVNVME_ERR("Invalid Parameters passed");
+
+		LEAVE();
+		return ret;
+	}
+
+	qpair = nvme->qpairs[core_id];
+
+	if(!qpair) {
+		KVNVME_ERR("No Matching I/O Queue found for the Passed CPU Core ID");
+		LEAVE();
+		return ret;
+	}
+
+	key_id = (char *)(kv->key.key);
+
+	lba = *(uint64_t*)key_id;
+
+	dsm_range.starting_lba = lba;
+	dsm_range.length = kv->value.length / nvme->sector_size;
+	dsm_range.attributes.raw = 0;
+
+	KVNVME_DEBUG("Complete Key ID: %s, Dissected Key ID: %s, LBA Offset: 0x%llx", key_id, sub_key_id, (unsigned long long)lba);
+
+	pthread_spin_lock(&qpair->sq_lock);
+	ret = spdk_nvme_ns_cmd_dataset_management(nvme->ns, qpair, SPDK_NVME_DSM_ATTR_DEALLOCATE, &dsm_range, 1, _lba_io_complete, &io_sequence);
+
+	if(ret) {
+		pthread_spin_unlock(&qpair->sq_lock);
+		KVNVME_ERR("Error in Performing Deallocate on the LBA Type SSD");
+		LEAVE();
+		return ret;
+	}
+
+	while(!io_sequence.is_completed) {
+		spdk_nvme_qpair_process_completions(qpair, 0);
+	}
+	pthread_spin_unlock(&qpair->sq_lock);
+
+	KVNVME_DEBUG("Result of the I/O: %d, Status of the I/O: %d", io_sequence.result, io_sequence.status);
+
+	LEAVE();
+	return ret;
+}
+int _lba_nvme_delete_async(kv_nvme_t *nvme, const kv_pair *kv, int core_id) {
+	int ret = KV_ERR_DD_INVALID_PARAM;
+	struct spdk_nvme_qpair *qpair = NULL;
+	uint64_t lba = 0;
+	char *key_id = NULL;
+	char sub_key_id[LBA_SSD_KEY_ID_SIZE];
+	struct spdk_nvme_dsm_range dsm_range;
+
+	ENTER();
+
+	if(!kv || !kv->key.key) {
+		KVNVME_ERR("Invalid Parameters passed");
+
+		LEAVE();
+		return ret;
+	}
+
+	qpair = nvme->qpairs[core_id];
+
+	if(!qpair) {
+		KVNVME_ERR("No Matching I/O Queue found for the Passed CPU Core ID");
+		LEAVE();
+		return ret;
+	}
+
+	key_id = (char *)(kv->key.key);
+
+	lba = *(uint64_t*)key_id;
+
+	dsm_range.starting_lba = lba;
+	dsm_range.length = kv->value.length / nvme->sector_size;
+	dsm_range.attributes.raw = 0;
+
+	KVNVME_DEBUG("Complete Key ID: %s, Dissected Key ID: %s, LBA Offset: 0x%llx", key_id, sub_key_id, (unsigned long long)lba);
+
+	pthread_spin_lock(&qpair->sq_lock);
+	ret = spdk_nvme_ns_cmd_dataset_management(nvme->ns, qpair, SPDK_NVME_DSM_ATTR_DEALLOCATE, &dsm_range, 1, _lba_async_io_complete, (void *)kv);
+	pthread_spin_unlock(&qpair->sq_lock);
+
+	LEAVE();
+	return ret;
+}
+
+int _lba_nvme_format(kv_nvme_t *nvme, int ses) {
         int ret = KV_ERR_DD_INVALID_PARAM;
         uint32_t ns_id = 0;
         struct spdk_nvme_format format = {};
@@ -275,12 +368,16 @@ int _lba_nvme_format(kv_nvme_t *nvme) {
         ENTER();
 
         // Assuming the Device's default format type is 0 (Data size 512, Metadata size 0)
-        format.lbaf     = 0;
-        format.ms       = 0;
-        format.pi       = 0;
-        format.pil      = 0;
-        // Userdata Erase
-        format.ses      = 1;
+        format.lbaf = 0;
+        format.ms = 0;
+        format.pi = 0;
+        format.pil = 0;
+
+	// ses = 0, map erase ses = 1, userdata Erase
+	if(ses != 0 && ses != 1){
+		KVNVME_ERR("invalid ses value(%d). changed ses=1", ses);
+		ses = 1;
+	}
 
         ns_id = spdk_nvme_ns_get_id(nvme->ns);
 
@@ -290,6 +387,7 @@ int _lba_nvme_format(kv_nvme_t *nvme) {
         }
 
         KVNVME_INFO("Namespace ID: %d", ns_id);
+        KVNVME_INFO("Ses : %d", ses);
 
         ret = spdk_nvme_ctrlr_format(nvme->ctrlr, ns_id, &format);
 

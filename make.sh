@@ -46,7 +46,7 @@ analysis)
 	;;
 
 *)
-	echo "Usage: build.sh {intel|all|io|driver|sdk|app|clean|intel_clean}"
+	echo "Usage: make.sh {intel|all|io|driver|sdk|app|clean|intel_clean}"
 	exit 1
 	;;
 esac

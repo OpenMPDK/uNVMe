@@ -274,7 +274,8 @@ struct spdk_nvme_qpair {
 	TAILQ_ENTRY(spdk_nvme_qpair)	per_process_tailq;
 
 	void				*req_buf;
-	pthread_spinlock_t		q_lock;
+	pthread_spinlock_t		sq_lock;
+	pthread_spinlock_t		cq_lock;
 	uint16_t 			current_qd;
 };
 

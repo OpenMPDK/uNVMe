@@ -32,7 +32,7 @@
 #endif
 
 #ifndef GB
-#define GB	(1024 * GB)
+#define GB	(1024 * MB)
 #endif
 
 enum hash_{

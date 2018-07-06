@@ -173,8 +173,7 @@ static void kv_nvme_remove_hugepage_info(void){
         remove(info_path);
 }
 
-void kv_env_init_with_shmid(uint32_t process_mem_size_mb, int shmid){
-        struct spdk_env_opts opts;
+void _kv_env_init(uint32_t process_mem_size_mb, struct spdk_env_opts* opts){
         int ret = KV_ERR_DD_INVALID_PARAM;
 
         pthread_mutex_lock(&g_init_mutex);
@@ -185,14 +184,21 @@ void kv_env_init_with_shmid(uint32_t process_mem_size_mb, int shmid){
         }
         pthread_mutex_unlock(&g_init_mutex);
 
-        spdk_env_opts_init(&opts);
-        opts.name = "KV_Interface";
-        opts.dpdk_mem_size = process_mem_size_mb;
-        opts.shm_id = shmid;
-        spdk_env_init(&opts);
+	if(opts){
+		spdk_env_init(opts);
+		KVNVME_INFO("mem_size_mb: %u shm_id: %u\n",opts->dpdk_mem_size, opts->shm_id);
+	}
+	else{
+		struct spdk_env_opts local_opts;
+		spdk_env_opts_init(&local_opts);
+		local_opts.name = "KV_Interface";
+		local_opts.dpdk_mem_size = process_mem_size_mb;
+		local_opts.shm_id = getpid();
+		spdk_env_init(&local_opts);
+		KVNVME_INFO("mem_size_mb: %u shm_id: %u\n",local_opts.dpdk_mem_size, local_opts.shm_id);
+	}
 
         KVNVME_INFO("Initialized the KV API Environment");
-        KVNVME_INFO("mem_size_mb: %u shm_id: %u\n",opts.dpdk_mem_size, opts.shm_id);
 
         ENTER();
 /*
@@ -218,7 +224,11 @@ void kv_env_init_with_shmid(uint32_t process_mem_size_mb, int shmid){
 }
 
 void kv_env_init(uint32_t process_mem_size_mb){
-	kv_env_init_with_shmid(process_mem_size_mb,getpid());
+	_kv_env_init(process_mem_size_mb,NULL);
+}
+
+void kv_env_init_with_spdk_opts(struct spdk_env_opts* opts){
+	_kv_env_init(opts->dpdk_mem_size,opts);
 }
 
 int kv_nvme_io_queue_type(uint64_t handle, int core_id) {
@@ -460,14 +470,15 @@ int kv_nvme_init(const char *bdf, kv_nvme_io_options *options, unsigned int ssd_
 
                 nvme->dev_ops.write = _lba_nvme_write;
                 nvme->dev_ops.read = _lba_nvme_read;
-                nvme->dev_ops.delete = NULL;
+                nvme->dev_ops.delete = _lba_nvme_delete;
 
                 nvme->dev_ops.write_async = _lba_nvme_write_async;
                 nvme->dev_ops.read_async = _lba_nvme_read_async;
-                nvme->dev_ops.delete_async = NULL;
+                nvme->dev_ops.delete_async = _lba_nvme_delete_async;
                 nvme->dev_ops.format = _lba_nvme_format;
                 nvme->dev_ops.get_used_size = _lba_nvme_get_used_size;
                 nvme->dev_ops.exist = NULL;
+                nvme->dev_ops.exist_async = NULL;
                 nvme->dev_ops.iterate_open = NULL;
                 nvme->dev_ops.iterate_close = NULL;
                 nvme->dev_ops.iterate_read = NULL;
@@ -486,6 +497,7 @@ int kv_nvme_init(const char *bdf, kv_nvme_io_options *options, unsigned int ssd_
                 nvme->dev_ops.format = _kv_nvme_format;
                 nvme->dev_ops.get_used_size = _kv_nvme_get_used_size;
                 nvme->dev_ops.exist = _kv_nvme_exist;
+                nvme->dev_ops.exist_async = _kv_nvme_exist_async;
 
                 nvme->dev_ops.iterate_open = _kv_nvme_iterate_open;
                 nvme->dev_ops.iterate_close = _kv_nvme_iterate_close;
@@ -578,7 +590,12 @@ int kv_nvme_init(const char *bdf, kv_nvme_io_options *options, unsigned int ssd_
                 	ret = pthread_create(&nvme->process_all_cqs_thread, NULL, (void *)&kv_nvme_process_all_cqs_thread, cq_thread_args);
 		}
 		else{
-                	ret = pthread_create(&nvme->process_all_cqs_thread, NULL, (void *)&lba_nvme_process_all_cqs_thread, cq_thread_args);
+			if(cq_thread_mask != 0){
+				ret = pthread_create(&nvme->process_all_cqs_thread, NULL, (void *)&lba_nvme_process_all_cqs_thread, cq_thread_args);
+			}
+			else{
+				KVNVME_ERR("Warning: CQ handling thread is not created, an application generating async io must handle CQ process by calling kv_process_completion()");
+			}
 		}
 
                 if(ret) {
@@ -719,7 +736,12 @@ int kv_nvme_init(const char *bdf, kv_nvme_io_options *options, unsigned int ssd_
                         	ret = pthread_create(&nvme->process_cq_thread[thread_id], NULL, (void *)&kv_nvme_process_cq_thread, cq_thread_args[thread_id]);
 			}
 			else{
-                        	ret = pthread_create(&nvme->process_cq_thread[thread_id], NULL, (void *)&lba_nvme_process_cq_thread, cq_thread_args[thread_id]);
+				if(cq_thread_mask != 0){
+					ret = pthread_create(&nvme->process_cq_thread[thread_id], NULL, (void *)&lba_nvme_process_cq_thread, cq_thread_args[thread_id]);
+				}
+				else{
+					KVNVME_ERR("Warning: CQ handling thread is not created, an application generating async io must handle CQ process by calling kv_process_completion()");
+				}
 			}
 
                         if(ret) {
@@ -809,7 +831,7 @@ int kv_nvme_finalize(char *bdf) {
         unsigned int queue_id, thread_id = 0;
         kv_nvme_t *nvme = NULL;
 
-        usleep(1000);
+	usleep(100);
 
         ENTER();
 
@@ -881,4 +903,36 @@ int kv_nvme_is_dd_initialized(){
 }
 
 
+void kv_nvme_process_completion(uint64_t handle){
+        kv_nvme_t *nvme = (kv_nvme_t*)handle;
+        struct spdk_nvme_qpair *qpair = NULL;
+        unsigned int queue_is_async = 0;
+        unsigned int queue_id = 0;
 
+        for(queue_id = 0; queue_id < MAX_CPU_CORES; queue_id++) {
+                qpair = nvme->qpairs[queue_id];
+                queue_is_async = ((nvme->io_queue_type[queue_id] == ASYNC_IO_QUEUE) ? 1 : 0);
+
+                if(qpair && queue_is_async) {
+                        pthread_spin_lock(&qpair->cq_lock);
+                        spdk_nvme_qpair_process_completions(qpair, 0);
+                        pthread_spin_unlock(&qpair->cq_lock);
+                }
+
+                queue_is_async = 0;
+        }
+}
+
+void kv_nvme_process_completion_queue(uint64_t handle, uint32_t queue_id){
+        kv_nvme_t *nvme = (kv_nvme_t*)handle;
+        struct spdk_nvme_qpair *qpair = NULL;
+        unsigned int queue_is_async = 0;
+
+	qpair = nvme->qpairs[queue_id];
+	queue_is_async = ((nvme->io_queue_type[queue_id] == ASYNC_IO_QUEUE) ? 1 : 0);
+	if(qpair && queue_is_async) {
+		pthread_spin_lock(&qpair->cq_lock);
+		spdk_nvme_qpair_process_completions(qpair, 0);
+		pthread_spin_unlock(&qpair->cq_lock);
+	}
+}

@@ -71,9 +71,10 @@ int simple_ut() {
 
 	//Prepare a key-value pair
 	kv_one.key.length = key_length;
-	kv_one.key.key = malloc(key_length);
+	kv_one.key.key = malloc(key_length + 1);
+	kv_one.keyspace_id = KV_KEYSPACE_IODATA;
 	assert(kv_one.key.key != NULL);
-	memset(kv_one.key.key, 0, key_length);
+	memset(kv_one.key.key, 0, key_length) + 1;
 
 	kv_one.value.value = malloc(value_size);
 	assert(kv_one.value.value != NULL);

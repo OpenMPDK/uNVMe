@@ -52,7 +52,7 @@ enum spdk_nvme_samsung_nvm_opcode {
   SPDK_NVME_OPC_KV_ITERATE_REQUEST	= 0xB1,
   SPDK_NVME_OPC_KV_ITERATE_READ		= 0xB2,
   SPDK_NVME_OPC_KV_APPEND     = 0x83,
-  SPDK_NVME_OPC_KV_EXIST	= 0x99,
+  SPDK_NVME_OPC_KV_EXIST	= 0xB3,
 
 };
 
@@ -63,6 +63,7 @@ typedef void (*spdk_nvme_cmd_cb)(void *, const struct spdk_nvme_cpl *);
  *
  * \param ns NVMe namespace to submit the KV Store I/O
  * \param qpair I/O queue pair to submit the request
+ * \param ns_id namespace id of key
  * \param key virtual address pointer to the value
  * \param key_length length (in bytes) of the key
  * \param buffer virtual address pointer to the value
@@ -85,7 +86,7 @@ typedef void (*spdk_nvme_cmd_cb)(void *, const struct spdk_nvme_cpl *);
  */
 int
 spdk_nvme_kv_cmd_store(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair,
-			      void *key, uint32_t key_length,
+			      uint32_t ns_id, void *key, uint32_t key_length,
 			      void *buffer, uint32_t buffer_length,
 			      uint32_t offset,
 			      spdk_nvme_cmd_cb cb_fn, void *cb_arg,
@@ -97,6 +98,7 @@ spdk_nvme_kv_cmd_store(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair,
  *
  * \param ns NVMe namespace to submit the KV Retrieve I/O
  * \param qpair I/O queue pair to submit the request
+ * \param ns_id namespace id of key
  * \param key virtual address pointer to the value
  * \param key_length length (in bytes) of the key
  * \param buffer virtual address pointer to the value
@@ -118,7 +120,7 @@ spdk_nvme_kv_cmd_store(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair,
  */
 int
 spdk_nvme_kv_cmd_retrieve(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair,
-			      void *key, uint32_t key_length,
+			      uint32_t ns_id, void *key, uint32_t key_length,
 			      void *buffer, uint32_t buffer_length,
 			      uint32_t offset,
 			      spdk_nvme_cmd_cb cb_fn, void *cb_arg,
@@ -129,6 +131,7 @@ spdk_nvme_kv_cmd_retrieve(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair
  *
  * \param ns NVMe namespace to submit the KV DeleteI/O
  * \param qpair I/O queue pair to submit the request
+ * \param ns_id namespace id of key
  * \param key virtual address pointer to the value
  * \param key_length length (in bytes) of the key
  * \param buffer_length length (in bytes) of the value
@@ -149,7 +152,7 @@ spdk_nvme_kv_cmd_retrieve(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair
  */
 int
 spdk_nvme_kv_cmd_delete (struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair,
-			      void *key, uint32_t key_length, uint32_t buffer_length, uint32_t offset,
+			      uint32_t ns_id, void *key, uint32_t key_length, uint32_t buffer_length, uint32_t offset,
 			      spdk_nvme_cmd_cb cb_fn, void *cb_arg,
 		              uint32_t io_flags, uint8_t  option);
 
@@ -158,10 +161,9 @@ spdk_nvme_kv_cmd_delete (struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair,
  *
  * \param ns NVMe namespace to submit the KV Exist I/O
  * \param qpair I/O queue pair to submit the request
- * \param keys virtual address pointer to the key array 
+ * \param ns_id namespace id of key
+ * \param key virtual address pointer to the value
  * \param key_length length (in bytes) of the key
- * \param buffer virtual address pointer to the return buffer 
- * \param buffer_length length (in bytes) of the return buffer 
  * \param cb_fn callback function to invoke when the I/O is completed
  * \param cb_arg argument to pass to the callback function
  * \param io_flags set flags, defined by the SPDK_NVME_IO_FLAGS_* entries
@@ -178,8 +180,7 @@ spdk_nvme_kv_cmd_delete (struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair,
  */
 int
 spdk_nvme_kv_cmd_exist (struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair,
-			      void *keys, uint32_t key_number, uint32_t key_length,
-			      void *buffer, uint32_t buffer_length,
+			      uint32_t ns_id, void *key, uint32_t key_length,
 			      spdk_nvme_cmd_cb cb_fn, void *cb_arg,
 		              uint32_t io_flags, uint8_t  option);
 
@@ -188,6 +189,7 @@ spdk_nvme_kv_cmd_exist (struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair,
  *
  * \param ns NVMe namespace to submit the KV Iterate I/O
  * \param qpair I/O queue pair to submit the request
+ * \param keyspace_id keyspace_id ( KV_KEYSPACE_IODATA = 0, KV_KEYSPACE_IODATA
  * \param bitmask Iterator bitmask (4 bytes) 
  * \param prefix Iterator prefix (4 bytes) 
  * \param cb_fn callback function to invoke when the I/O is completed
@@ -206,7 +208,7 @@ spdk_nvme_kv_cmd_exist (struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair,
  */
 int
 spdk_nvme_kv_cmd_iterate_open (struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair,
-			      uint32_t bitmask, uint32_t prefix, 
+			      uint8_t keyspace_id, uint32_t bitmask, uint32_t prefix, 
 			      spdk_nvme_cmd_cb cb_fn, void *cb_arg,
 		              uint32_t io_flags, uint8_t  option);
 

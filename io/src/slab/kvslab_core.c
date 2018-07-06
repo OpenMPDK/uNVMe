@@ -73,7 +73,6 @@ static size_t kvsl_slab_data_size(void){
 	return kv_settings.slab_size - KVSLAB_SLAB_HDR_SIZE;
 }
 
-#define MAX_NUM_SLAB_CLASS (5)
 static void kvsl_generate_profile(void){
 	size_t *profile = kv_settings.profile; /* slab profile */
 	uint8_t id;                         /* slab class id */
@@ -99,10 +98,16 @@ static void kvsl_generate_profile(void){
 		if (item_sz == last_item_sz) {
 		    item_sz++;
 		}
-		item_sz = KVSLAB_ALIGN(item_sz, KVSLAB_ALIGNMENT);
+		item_sz = KV_MEM_ALIGN(item_sz, KVSLAB_ALIGNMENT);
 	}
-	kv_settings.profile_last_id = MAX_NUM_SLAB_CLASS - 1;
-	kv_settings.max_chunk_size = profile[MAX_NUM_SLAB_CLASS - 1];
+	if (item_sz >= max_item_sz) {
+		profile[id] = max_item_sz;
+		kv_settings.profile_last_id = id;
+		kv_settings.max_chunk_size = max_item_sz;
+	} else {
+		kv_settings.profile_last_id = MAX_NUM_SLAB_CLASS - 1;
+		kv_settings.max_chunk_size = profile[MAX_NUM_SLAB_CLASS - 1];
+	}
 
 	log_debug(KV_LOG_INFO, "[DONE]%s\n", __func__);
 }
@@ -125,7 +130,6 @@ void kvsl_set_options(bool use_default, double factor, size_t max_slab_memory, s
 	}
 
 	memset(kv_settings.profile, 0, sizeof(kv_settings.profile));
-	kv_settings.profile_last_id = KVSLAB_SLABCLASS_MAX_ID;
 
 	kvsl_generate_profile();
 
@@ -266,6 +270,7 @@ static struct kvsl_item * _kvsl_slab_get_item(uint8_t cid, uint8_t did){
 	it->offset = (uint32_t)((uint8_t *)it - (uint8_t *)slab); //including slab hdr size
 	it->sid = slab->sid;
 	it->did = did;
+	kvsl_slab_increase_use_cnt(it->did, it->sid);
 
 	if (kvsl_slab_full(sinfo)) {
 		/* move memory slab from partial to full q */
@@ -641,7 +646,7 @@ void print_slab_info(void){
 }
 
 
-kvsl_rstatus_t kvsl_slab_init(size_t add_mem_size){
+kvsl_rstatus_t kvsl_slab_init(void){
 	kvsl_rstatus_t status;
 	int nr_slab = kv_settings.nr_slab; //nr_slab is same with num of devices for now
 	int nr_dev = nr_slab;
@@ -670,14 +675,6 @@ kvsl_rstatus_t kvsl_slab_init(size_t add_mem_size){
 	/* init nmslab and mspace */
 	kv_nmslab = MAX(kv_nctable, kv_settings.max_slab_memory / kv_settings.slab_size);
 	kv_mspace = kv_nmslab * kv_settings.slab_size;
-
-	/* call once before using kv_zalloc */
-	if (kv_settings.slab_alloc_policy == SLAB_MM_ALLOC_HUGE){
-		add_mem_size = MAX(add_mem_size, 4*MB); //used for D/D init
-		size_t total_mem_size_MB = (KVSLAB_ALIGN(kv_mspace, 2*MB)/MB * nr_dev) + (KVSLAB_ALIGN(add_mem_size, 2*MB)/MB);
-
-		kv_env_init(total_mem_size_MB);
-	}
 
 	for(int did=0; did<nr_slab; did++){
 		kv_nfree_msinfoq[did] = 0;

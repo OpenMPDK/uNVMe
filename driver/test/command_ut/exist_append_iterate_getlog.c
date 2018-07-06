@@ -51,13 +51,14 @@ int ut() {
 	int ret = -EINVAL;
 
 	//NOTE : check pci information first using lspci -v
-	char *nvme_pci_dev = "0000:0a:00.0";
+	char *nvme_pci_dev = "0000:02:00.0";
 
 	int ssd_type = KV_TYPE_SSD;
 	int key_length = 16;
 	int value_size = 4096;
 	int insert_count = 1 * 2;
 	double waf = .0;
+	int qid = DEFAULT_IO_QUEUE_ID;
 
 	kv_nvme_io_options options = {0};
 	options.core_mask = 1; // Use CPU 0
@@ -138,10 +139,11 @@ int ut() {
 		if(!kv[i])
 			return -ENOMEM;
 
-		kv[i]->key.key = malloc(key_length);
+		kv[i]->key.key = malloc(key_length + 1);
 		if(!kv[i]->key.key)
 			return -ENOMEM;
 		kv[i]->key.length = key_length;
+		sprintf(kv[i]->key.key, "mountain%08x", i);
 
 		kv[i]->value.value = kv_zalloc(value_size);
 		if(!kv[i]->value.value)
@@ -160,24 +162,21 @@ int ut() {
 		if(!(i % 10000)){
 			fprintf(stderr, "kv_nvme_write: %d\n", i);
 		}
-		sprintf(kv[i]->key.key, "mountain%08x", i);
 		kv[i]->param.io_option.store_option = KV_STORE_DEFAULT;
-
 		//Store
-		if(kv_nvme_write(handle, kv[i]))
+		if(kv_nvme_write(handle, qid, kv[i]))
 			return -EINVAL;
 	}
 	gettimeofday(&end, NULL);
 	show_elapsed_time(&start,&end, "kv_nvme_write", insert_count, value_size, NULL);
 
-
+	//NVME Append
+	// it is monitored that sending an append cmd make kv_ssd hanng which need to download fw again. so fix it not to send to avoid it . (2017/09/29)
+	/*
 	for(i = 0; i < insert_count; i++){
 		memset(kv[i]->key.key,0,key_length);
 	}
 
-	//NVME Append
-	// it is monitored that sending an append cmd make kv_ssd hanng which need to download fw again. so fix it not to send to avoid it . (2017/09/29)
-	/*
 	gettimeofday(&start, NULL);
 	for(i = 0; i < insert_count; i++){
 		if(!(i % 10000)){
@@ -187,78 +186,62 @@ int ut() {
 		kv[i]->param.io_option.append_option = KV_APPEND_DEFAULT;
 
 		//Append
-		if(kv_nvme_append(handle, kv[i]))
+		if(kv_nvme_append(handle, qid, kv[i]))
 			return -EINVAL;
 	}
 	gettimeofday(&end, NULL);
 	show_elapsed_time(&start,&end, "kv_nvme_append", insert_count, value_size, NULL);
 	*/
 
+	//NVMe Read
 	for(i = 0; i < insert_count; i++){
 		memset(kv[i]->key.key,0,key_length);
 		memset(kv[i]->value.value,0,value_size);
+		sprintf(kv[i]->key.key, "mountain%08x", i);
 	}
 
-	//NVMe Read
 	gettimeofday(&start, NULL);
 	for(i = 0; i < insert_count; i++){
 		if(!(i % 10000)){
 			fprintf(stderr, "kv_nvme_read: %d\n", i);
 		}
-		sprintf(kv[i]->key.key, "mountain%08x", i);
 		kv[i]->param.io_option.retrieve_option = KV_RETRIEVE_DEFAULT;
-		if(kv_nvme_read(handle, kv[i]))
+		if(kv_nvme_read(handle, qid, kv[i]))
 			return -EINVAL;
 	}
 	gettimeofday(&end, NULL);
 	show_elapsed_time(&start,&end, "kv_nvme_read", insert_count, value_size, NULL);
 
 	//Exist Before Delete
-	kv_key_list key_list;
-	kv_value exist_result;
-
 	printf("Exist Before Delete\n");
-	key_list.buffer = kv_zalloc(value_size);
-	key_list.key_length = key_length;
-	key_list.key_number = 0;
-	key_list.option = KV_EXIST_DEFAULT;
-
-	exist_result.value = kv_zalloc(value_size);
-	exist_result.length = value_size;
-
-	for(i = 0 ; i < value_size/key_length; i++){
-		sprintf(key_list.buffer+(i*key_length),"mountain%08x",i);
-		key_list.key_number++;
+	for(i = 0; i < insert_count; i++){
+		memset(kv[i]->key.key,0,key_length);
+		sprintf(kv[i]->key.key, "mountain%08x",i);
+		kv[i]->param.io_option.exist_option = KV_EXIST_DEFAULT;
 	}
-	printf("key_list.buffer=%s\n",(char*)key_list.buffer);
-	printf("key_list.key_number=%d\n",key_list.key_number);
-	printf("[%s] key_list.buffer=%lx result.buffer=%lx\n",__FUNCTION__,(uint64_t)key_list.buffer, (uint64_t)exist_result.value);
-
 	gettimeofday(&start, NULL);
-	kv_nvme_exist(handle, &key_list, &exist_result);
+	for(i = 0; i < insert_count; i++){
+		if(!(i%10000)){
+			fprintf(stderr,"kv_nvme_exist: %d\n",i);
+		}
+		if(kv_nvme_exist(handle, qid, kv[i]) != KV_SUCCESS)
+			return -EINVAL;
+	}
 	gettimeofday(&end, NULL);
 	show_elapsed_time(&start,&end,"kv_nvme_exist",insert_count, value_size, NULL);
-
-	for(i = 0; i < key_list.key_number; i++){
-		if(!(i%key_length)){
-			printf("\n");
-		}
-		printf("%d ",*((char*)exist_result.value+i));
-	}
-	printf("\n");
 
 	//NVMe Delete
 	for(i = 0; i < insert_count; i++){
 		memset(kv[i]->key.key,0,key_length);
+		sprintf(kv[i]->key.key, "mountain%08x",i);
+		kv[i]->param.io_option.delete_option = KV_DELETE_DEFAULT;
 	}
 	gettimeofday(&start, NULL);
 	for(i = 0; i < insert_count; i++){
 		if(!(i%10000)){
 			fprintf(stderr,"kv_nvme_delete: %d\n",i);
 		}
-		sprintf(kv[i]->key.key, "mountain%08x",i);
-		kv[i]->param.io_option.delete_option = KV_DELETE_DEFAULT;
-		if(kv_nvme_delete(handle, kv[i]))
+		if(kv_nvme_delete(handle, qid, kv[i]))
 			return -EINVAL;
 	}
 	gettimeofday(&end, NULL);
@@ -266,26 +249,21 @@ int ut() {
 
 	//Exist After Delete
 	printf("Exist After Delete\n");
-	key_list.key_number=0;
-	for(i = 0 ; i < value_size/key_length; i++){
-		sprintf(key_list.buffer+(i*key_length),"mountain%08x",i);
-		key_list.key_number++;
+	for(i = 0; i < insert_count; i++){
+		memset(kv[i]->key.key,0,key_length);
+		sprintf(kv[i]->key.key, "mountain%08x",i);
+		kv[i]->param.io_option.exist_option = KV_EXIST_DEFAULT;
 	}
-	printf("key_list.buffer=%s\n",(char*)key_list.buffer);
-	printf("key_list.key_number=%d\n",key_list.key_number);
-
 	gettimeofday(&start, NULL);
-	kv_nvme_exist(handle, &key_list, &exist_result);
+	for(i = 0; i < insert_count; i++){
+		if(!(i%10000)){
+			fprintf(stderr,"kv_nvme_exist: %d\n",i);
+		}
+		if(kv_nvme_exist(handle, qid, kv[i]) != KV_ERR_NOT_EXIST_KEY)
+			return -EINVAL;
+	}
 	gettimeofday(&end, NULL);
 	show_elapsed_time(&start,&end,"kv_nvme_exist",insert_count, value_size, NULL);
-
-	for(i = 0; i < key_list.key_number; i++){
-		if(!(i%key_length)){
-			printf("\n");
-		}
-		printf("%d ",*((char*)exist_result.value+i));
-	}
-	printf("\n");
 
 	//Teardown Memory
 	gettimeofday(&start, NULL);
@@ -299,8 +277,6 @@ int ut() {
 	}
 
 	free(kv);
-	kv_free(key_list.buffer);
-	kv_free(exist_result.value);
 	gettimeofday(&end, NULL);
 	show_elapsed_time(&start, &end, "Teardown Memory", insert_count, 0, NULL);
 

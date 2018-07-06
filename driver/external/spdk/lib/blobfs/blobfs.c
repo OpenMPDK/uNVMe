@@ -281,6 +281,7 @@ __send_request_direct(fs_request_fn fn, void *arg)
 static void
 common_fs_bs_init(struct spdk_filesystem *fs, struct spdk_blob_store *bs)
 {
+	spdk_allocate_thread();
 	fs->bs = bs;
 	fs->bs_opts.cluster_sz = spdk_bs_get_cluster_size(bs);
 	fs->md_fs_channel->bs_channel = spdk_bs_alloc_io_channel(fs->bs, SPDK_IO_PRIORITY_DEFAULT, 512);

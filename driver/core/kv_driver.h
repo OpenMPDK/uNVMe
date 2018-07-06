@@ -71,13 +71,15 @@ typedef struct nvme_dev_operations {
 	/** Pointer to the NVMe Delete Async Function */
 	int (*delete_async)(kv_nvme_t *nvme, const kv_pair *kv, int core_id);
 	/** Pointer to the NVMe Format Function */
-	int (*format)(kv_nvme_t *nvme);
+	int (*format)(kv_nvme_t *nvme, int ses);
 	/** Pointer to the NVMe Get Used Size Function */
 	uint64_t (*get_used_size)(kv_nvme_t *nvme);
 	/** Pointer to the NVMe Exist Function */
-	int (*exist)(kv_nvme_t *nvme, const kv_key_list *key_list, kv_value *result, int core_id);
+	int (*exist)(kv_nvme_t *nvme, const kv_pair *kv, int core_id);
+	/** Pointer to the NVMe Exist Function */
+	int (*exist_async)(kv_nvme_t *nvme, const kv_pair *kv, int core_id);
 	/** Pointer to the NVMe Iterate Open */
-	uint32_t (*iterate_open)(kv_nvme_t *nvme, const uint32_t bitmask, const uint32_t prefix, const uint8_t iterate_type, int core_id);
+	uint32_t (*iterate_open)(kv_nvme_t *nvme, const uint8_t keyspace_id, const uint32_t bitmask, const uint32_t prefix, const uint8_t iterate_type, int core_id);
 	/** Pointer to the NVMe Iterate Close */
 	int (*iterate_close)(kv_nvme_t *nvme, const uint8_t iterator, int core_id);
 	/** Pointer to the NVMe Iterate Read */

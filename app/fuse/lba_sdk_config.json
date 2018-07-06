@@ -1,0 +1,20 @@
+{
+ "cache": "off",
+ "cache_algorithm": "radix",
+ "cache_reclaim_policy" : "lru",
+ "slab_size" : 24,
+ "app_hugemem_size" : 3072,
+ "slab_alloc_policy" : "huge",
+ "ssd_type" : "lba",
+ "log_level" : 0,
+ "log_file" : "/tmp/kvsdk.log",
+  "device_description" : [
+    {
+      "dev_id" : "0000:0a:00.0",
+      "core_mask" : 3,
+      "sync_mask" : 0,
+      "cq_thread_mask" : 0,
+      "queue_depth" : 2048
+    }
+  ]
+}

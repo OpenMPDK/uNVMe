@@ -1,0 +1,45 @@
+nvme-id-ns(1)
+=============
+
+NAME
+----
+nvme-show-regs - Reads and shows the defined NVMe controller registers.
+
+SYNOPSIS
+--------
+[verse]
+'nvme show-regs' <device> [--human-readable | -H]
+
+DESCRIPTION
+-----------
+For the NVMe device given, sends an identify namespace command and
+provides the result and returned structure.
+
+The <device> parameter is mandatory and must be the nvme admin character
+device (ex: /dev/nvme0). The program uses knowledge of the sysfs layout
+to map the device to the pci resource stored there and mmaps the memory
+to get access to the registers.
+
+OPTIONS
+-------
+-H::
+--human-readable::
+       Display registers in human readable format. 
+
+
+EXAMPLES
+--------
+* Show the nvme pci controller registers in a binary format:
++
+------------
+# nvme show-regs /dev/nvme0
+------------
+* Show the nvme pci controller registers in a human readable format:
++
+------------
+# nvme show-regs /dev/nvme0 -H
+------------
+
+NVME
+----
+Part of the nvme-user suite

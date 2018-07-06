@@ -112,7 +112,6 @@ static void kv_set_sdk_nxx_default(kv_sdk *sdk_opt){
         sdk_opt->slab_alloc_policy = SLAB_MM_ALLOC_HUGE;
         sdk_opt->ssd_type = KV_TYPE_SSD;
         sdk_opt->log_level = 0;
-        sdk_opt->polling_interval = 1; //NOTE : could be longer for nxx
         strcpy(sdk_opt->log_file, "/tmp/kvsdk.log");
 }
 
@@ -125,7 +124,7 @@ static void kv_copy_dev_config(kv_sdk *dst, kv_sdk *src){
 	dst->nr_ssd = src->nr_ssd;
 	for(int i = 0; i < dst->nr_ssd; i++){
 		memcpy(dst->dev_id[i], src->dev_id[i], DEV_ID_LEN);
-		if ((src->dd_options[i].core_mask) && (src->dd_options[i].cq_thread_mask)){
+		if (src->dd_options[i].core_mask){
 			dst->dd_options[i].core_mask = src->dd_options[i].core_mask;
 			dst->dd_options[i].sync_mask = src->dd_options[i].sync_mask;
 			dst->dd_options[i].cq_thread_mask = src->dd_options[i].cq_thread_mask;

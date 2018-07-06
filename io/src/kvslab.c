@@ -43,22 +43,21 @@
 
 static pthread_mutex_t *kvsl_slab_mutex;
 
-int kvslab_init(size_t mem_size, int slab_alloc_policy, int nr_ssd, size_t add_mem_size){
+int kvslab_init(size_t total_slab_size, int slab_alloc_policy, int nr_ssd){
 	kvsl_rstatus_t status;
 
 	double factor = 2.0;
-	size_t chunk_size = KVSLAB_ALIGN(KVSLAB_ITEM_HDR_SIZE + 4*KB + sizeof(kv_pair) + KV_MAX_KEY_LEN + MEMORY_ALIGNMENT, KVSLAB_ALIGNMENT); //4KB value with 255B key
+	size_t chunk_size = KV_MEM_ALIGN(KVSLAB_ITEM_HDR_SIZE + 4*KB + sizeof(kv_pair) + KV_MAX_KEY_LEN + MEMORY_ALIGNMENT, KVSLAB_ALIGNMENT); //4KB value with 255B key
 
 	/**
 	 * slab can support upto 64KB value length for now.
 	 */
-	size_t slab_size = KVSLAB_ALIGN(MAX_SLAB_SIZE, KVSLAB_ALIGNMENT);
-	size_t target_max_slab_memory = mem_size;
-	size_t max_slab_memory = KVSLAB_ALIGN(target_max_slab_memory, KVSLAB_ALIGNMENT);
+	size_t slab_size = KV_MEM_ALIGN(HUGEPAGE_SIZE, KVSLAB_ALIGNMENT);
+	size_t max_slab_memory = KV_MEM_ALIGN(total_slab_size, KVSLAB_ALIGNMENT);
 
 	kvsl_set_options(false, factor, max_slab_memory, chunk_size, slab_size, slab_alloc_policy, nr_ssd);
 
-	status = kvsl_slab_init(add_mem_size);
+	status = kvsl_slab_init();
 	if (status != KVSLAB_OK) {
 		exit(1);
 	}
@@ -151,8 +150,7 @@ kv_pair* slab_alloc_pair(int key_len, int value_len, int did){
 	void* data = (void*)kvsl_item_data(item);
 	kv_pair* kv = data;
 	kv->key.key = (void*)(((char*)data)+sizeof(kv_pair));
-	kv->value.value = (void*)KVSLAB_ALIGN_PTR(((char*)kv->key.key)+key_len, MEMORY_ALIGNMENT);
-	kvsl_slab_increase_use_cnt(item->did, item->sid);
+	kv->value.value = (void*)KV_PTR_ALIGN(((char*)kv->key.key)+key_len, MEMORY_ALIGNMENT);
 	return kv;
 
 err:
@@ -174,8 +172,7 @@ kv_iterate* slab_alloc_iterate(int key_len, int value_len, int did){
 	void* data = (void*)kvsl_item_data(item);
 	kv_iterate* it = (kv_iterate*)data;
 	it->kv.key.key = (void*)(((char*)data)+sizeof(kv_iterate));
-	it->kv.value.value = (void*)KVSLAB_ALIGN_PTR(((char*)it->kv.key.key)+key_len, MEMORY_ALIGNMENT);
-	kvsl_slab_increase_use_cnt(item->did, item->sid);
+	it->kv.value.value = (void*)KV_PTR_ALIGN(((char*)it->kv.key.key)+key_len, MEMORY_ALIGNMENT);
 	return it;
 
 err:

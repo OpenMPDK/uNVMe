@@ -72,7 +72,8 @@ static void io_complete(void *arg, const struct spdk_nvme_cpl *completion) {
 }
 
 kv_nvme_cpl_t *kv_nvme_submit_raw_cmd(uint64_t handle, kv_nvme_cmd_t cmd, void *buf, uint32_t buf_len, raw_cmd_type_t type) {
-	int ret = KV_ERR_DD_INVALID_PARAM, core_id = 0;
+	int ret = KV_ERR_DD_INVALID_PARAM;
+	int qid = DEFAULT_IO_QUEUE_ID;
 	kv_nvme_cpl_t *cpl = NULL;
 	kv_nvme_t *nvme = NULL;
 	struct spdk_nvme_qpair *qpair = NULL;
@@ -104,14 +105,13 @@ kv_nvme_cpl_t *kv_nvme_submit_raw_cmd(uint64_t handle, kv_nvme_cmd_t cmd, void *
 	if(ADMIN_CMD_TYPE == type) {
 		ret = spdk_nvme_ctrlr_cmd_admin_raw(nvme->ctrlr, &spdk_cmd, buf, buf_len, admin_complete, &cmd_sequence);
 	} else if(IO_CMD_TYPE == type) {
-		core_id = sched_getcpu();
 
-		if(core_id < 0 ) {
+		qid = sched_getcpu();
+		if(qid < 0 ) {
 			KVNVME_WARN("Could not get the CPU Core ID, Using Default 0");
-			core_id = 0;
+			qid = 0;
 		}
-
-		qpair = nvme->qpairs[core_id];
+		qpair = nvme->qpairs[qid];
 
 		if(!qpair) {
 			KVNVME_ERR("No Matching I/O Queue found for the Passed CPU Core ID");
@@ -174,9 +174,8 @@ kv_nvme_cpl_t *kv_nvme_submit_raw_cmd(uint64_t handle, kv_nvme_cmd_t cmd, void *
 	return cpl;
 }
 
-int kv_nvme_append(uint64_t handle, const kv_pair *kv) {
+int kv_nvme_append(uint64_t handle, int qid, const kv_pair *kv) {
 	int ret = KV_ERR_DD_INVALID_PARAM;
-	int core_id = 0;
 	unsigned int queue_is_async = 0;
 	kv_nvme_t *nvme = NULL;
 
@@ -191,15 +190,15 @@ int kv_nvme_append(uint64_t handle, const kv_pair *kv) {
 
 	nvme = (kv_nvme_t *)handle;
 
-	core_id = sched_getcpu();
-
-	if(core_id < 0 ) {
-		KVNVME_WARN("Could not get the CPU Core ID, Using Default 0");
-		core_id = 0;
+	if(qid < 0){
+		qid = sched_getcpu();
+		if(qid < 0) {
+			KVNVME_WARN("Could not get the CPU Core ID, Using Default 0");
+			qid = 0;
+		}
 	}
 
-	queue_is_async = ((nvme->io_queue_type[core_id] == ASYNC_IO_QUEUE) ? 1 : 0);
-
+	queue_is_async = ((nvme->io_queue_type[qid] == ASYNC_IO_QUEUE) ? 1 : 0);
 	if(queue_is_async) {
 		KVNVME_ERR("I/O Queue supports only Async, and Append command doesn't support Async");
 
@@ -208,15 +207,14 @@ int kv_nvme_append(uint64_t handle, const kv_pair *kv) {
 	}
 
 	uint8_t is_store = 0;
-	ret = nvme->dev_ops.write(nvme, kv, core_id, is_store);
+	ret = nvme->dev_ops.write(nvme, kv, qid, is_store);
 
 	LEAVE();
 	return ret;
 }
 
-int kv_nvme_write(uint64_t handle, const kv_pair *kv) {
+int kv_nvme_write(uint64_t handle, int qid, const kv_pair *kv) {
 	int ret = KV_ERR_DD_INVALID_PARAM;
-	int core_id = 0;
 	unsigned int queue_is_async = 0;
 	kv_nvme_t *nvme = NULL;
 
@@ -231,15 +229,15 @@ int kv_nvme_write(uint64_t handle, const kv_pair *kv) {
 
 	nvme = (kv_nvme_t *)handle;
 
-	core_id = sched_getcpu();
-
-	if(core_id < 0 ) {
-		KVNVME_WARN("Could not get the CPU Core ID, Using Default 0");
-		core_id = 0;
+	if(qid < 0){
+		qid = sched_getcpu();
+		if(qid < 0) {
+			KVNVME_WARN("Could not get the CPU Core ID, Using Default 0");
+			qid = 0;
+		}
 	}
 
-	queue_is_async = ((nvme->io_queue_type[core_id] == ASYNC_IO_QUEUE) ? 1 : 0);
-
+	queue_is_async = ((nvme->io_queue_type[qid] == ASYNC_IO_QUEUE) ? 1 : 0);
 	if(queue_is_async) {
 		//KVNVME_ERR("I/O Queue supports only Async, Please do Async Write");
 
@@ -248,15 +246,15 @@ int kv_nvme_write(uint64_t handle, const kv_pair *kv) {
 	}
 
 	uint8_t is_store = 1;
-	ret = nvme->dev_ops.write(nvme, kv, core_id, is_store);
+	ret = nvme->dev_ops.write(nvme, kv, qid, is_store);
 
 	LEAVE();
 	return ret;
 }
 
-int kv_nvme_write_async(uint64_t handle, const kv_pair *kv) {
+
+int kv_nvme_write_async(uint64_t handle, int qid, const kv_pair *kv) {
 	int ret = KV_ERR_DD_INVALID_PARAM;
-	int core_id = 0;
 	unsigned int queue_is_sync = 0;
 	kv_nvme_t *nvme = NULL;
 
@@ -271,15 +269,15 @@ int kv_nvme_write_async(uint64_t handle, const kv_pair *kv) {
 
 	nvme = (kv_nvme_t *)handle;
 
-	core_id = sched_getcpu();
-
-	if(core_id < 0 ) {
-		KVNVME_WARN("Could not get the CPU Core ID, Using Default 0");
-		core_id = 0;
+	if(qid < 0){
+		qid = sched_getcpu();
+		if(qid < 0) {
+			KVNVME_WARN("Could not get the CPU Core ID, Using Default 0");
+			qid = 0;
+		}
 	}
 
-	queue_is_sync = ((nvme->io_queue_type[core_id] == SYNC_IO_QUEUE) ? 1 : 0);
-
+	queue_is_sync = ((nvme->io_queue_type[qid] == SYNC_IO_QUEUE) ? 1 : 0);
 	if(queue_is_sync) {
 		//KVNVME_ERR("I/O Queue supports only Sync, Please do Sync Write");
 
@@ -287,15 +285,14 @@ int kv_nvme_write_async(uint64_t handle, const kv_pair *kv) {
 		return KV_ERR_DD_INVALID_QUEUE_TYPE;
 	}
 
-	ret = nvme->dev_ops.write_async(nvme, kv, core_id);
+	ret = nvme->dev_ops.write_async(nvme, kv, qid);
 
 	LEAVE();
 	return ret;
 }
 
-int kv_nvme_read(uint64_t handle, kv_pair *kv) {
+int kv_nvme_read(uint64_t handle, int qid, kv_pair *kv) {
 	int ret = KV_ERR_DD_INVALID_PARAM;
-	int core_id = 0;
 	unsigned int queue_is_async = 0;
 	kv_nvme_t *nvme = NULL;
 
@@ -310,15 +307,15 @@ int kv_nvme_read(uint64_t handle, kv_pair *kv) {
 
 	nvme = (kv_nvme_t *)handle;
 
-	core_id = sched_getcpu();
-
-	if(core_id < 0) {
-		KVNVME_WARN("Could not get the CPU Core ID, Using Default 0");
-		core_id = 0;
+	if(qid < 0){
+		qid = sched_getcpu();
+		if(qid < 0) {
+			KVNVME_WARN("Could not get the CPU Core ID, Using Default 0");
+			qid = 0;
+		}
 	}
 
-	queue_is_async = ((nvme->io_queue_type[core_id] == ASYNC_IO_QUEUE) ? 1 : 0);
-
+	queue_is_async = ((nvme->io_queue_type[qid] == ASYNC_IO_QUEUE) ? 1 : 0);
 	if(queue_is_async) {
 		//KVNVME_ERR("I/O Queue supports only Async, Please do Async Read");
 
@@ -326,15 +323,14 @@ int kv_nvme_read(uint64_t handle, kv_pair *kv) {
 		return KV_ERR_DD_INVALID_QUEUE_TYPE;
 	}
 
-	ret = nvme->dev_ops.read(nvme, kv, core_id);
+	ret = nvme->dev_ops.read(nvme, kv, qid);
 
 	LEAVE();
 	return ret;
 }
 
-int kv_nvme_read_async(uint64_t handle, kv_pair *kv) {
+int kv_nvme_read_async(uint64_t handle, int qid, kv_pair *kv) {
 	int ret = KV_ERR_DD_INVALID_PARAM;
-	int core_id = 0;
 	unsigned int queue_is_sync = 0;
 	kv_nvme_t *nvme = NULL;
 
@@ -349,15 +345,15 @@ int kv_nvme_read_async(uint64_t handle, kv_pair *kv) {
 
 	nvme = (kv_nvme_t *)handle;
 
-	core_id = sched_getcpu();
-
-	if(core_id < 0) {
-		KVNVME_WARN("Could not get the CPU Core ID, Using Default 0");
-		core_id = 0;
+	if(qid < 0){
+		qid = sched_getcpu();
+		if(qid < 0) {
+			KVNVME_WARN("Could not get the CPU Core ID, Using Default 0");
+			qid = 0;
+		}
 	}
 
-	queue_is_sync = ((nvme->io_queue_type[core_id] == SYNC_IO_QUEUE) ? 1 : 0);
-
+	queue_is_sync = ((nvme->io_queue_type[qid] == SYNC_IO_QUEUE) ? 1 : 0);
 	if(queue_is_sync) {
 		//KVNVME_ERR("I/O Queue supports only Sync, Please do Sync Read");
 
@@ -365,15 +361,14 @@ int kv_nvme_read_async(uint64_t handle, kv_pair *kv) {
 		return KV_ERR_DD_INVALID_QUEUE_TYPE;
 	}
 
-	ret = nvme->dev_ops.read_async(nvme, kv, core_id);
+	ret = nvme->dev_ops.read_async(nvme, kv, qid);
 
 	LEAVE();
 	return ret;
 }
 
-int kv_nvme_delete(uint64_t handle, const kv_pair *kv) {
+int kv_nvme_delete(uint64_t handle, int qid, const kv_pair *kv) {
 	int ret = KV_ERR_DD_INVALID_PARAM;
-	int core_id = 0;
 	unsigned int queue_is_async = 0;
 	kv_nvme_t *nvme = NULL;
 
@@ -388,15 +383,15 @@ int kv_nvme_delete(uint64_t handle, const kv_pair *kv) {
 
 	nvme = (kv_nvme_t *)handle;
 
-	core_id = sched_getcpu();
-
-	if(core_id < 0) {
-		KVNVME_WARN("Could not get the CPU Core ID, Using Default 0");
-		core_id = 0;
+	if(qid < 0){
+		qid = sched_getcpu();
+		if(qid < 0) {
+			KVNVME_WARN("Could not get the CPU Core ID, Using Default 0");
+			qid = 0;
+		}
 	}
 
-	queue_is_async = ((nvme->io_queue_type[core_id] == ASYNC_IO_QUEUE) ? 1 : 0);
-
+	queue_is_async = ((nvme->io_queue_type[qid] == ASYNC_IO_QUEUE) ? 1 : 0);
 	if(queue_is_async) {
 		//KVNVME_ERR("I/O Queue supports only Async, Please do Async Delete");
 
@@ -405,7 +400,7 @@ int kv_nvme_delete(uint64_t handle, const kv_pair *kv) {
 	}
 
 	if(nvme->dev_ops.delete) {
-		ret = nvme->dev_ops.delete(nvme, kv, core_id);
+		ret = nvme->dev_ops.delete(nvme, kv, qid);
 	} else {
 		KVNVME_ERR("This function is not supported by the Device");
 
@@ -416,44 +411,8 @@ int kv_nvme_delete(uint64_t handle, const kv_pair *kv) {
 	return ret;
 }
 
-int kv_nvme_exist(uint64_t handle, const kv_key_list* key_list, kv_value* result) {
+int kv_nvme_delete_async(uint64_t handle, int qid, const kv_pair *kv) {
 	int ret = KV_ERR_DD_INVALID_PARAM;
-	int core_id = 0;
-	kv_nvme_t *nvme = NULL;
-
-	ENTER();
-
-	if(!handle) {
-		KVNVME_ERR("Invalid handle passed");
-
-		LEAVE();
-		return ret;
-	}
-
-	nvme = (kv_nvme_t *)handle;
-
-	core_id = sched_getcpu();
-
-	if(core_id < 0) {
-		KVNVME_WARN("Could not get the CPU Core ID, Using Default 0");
-		core_id = 0;
-	}
-
-	if(nvme->dev_ops.exist) {
-		ret = nvme->dev_ops.exist(nvme, key_list, result, core_id);
-	} else {
-		KVNVME_ERR("This function is not supported by the Device");
-
-		ret = KV_ERR_DD_UNSUPPORTED_CMD;
-	}
-
-	LEAVE();
-	return ret;
-}
-
-int kv_nvme_delete_async(uint64_t handle, const kv_pair *kv) {
-	int ret = KV_ERR_DD_INVALID_PARAM;
-	int core_id = 0;
 	unsigned int queue_is_sync = 0;
 	kv_nvme_t *nvme = NULL;
 
@@ -468,15 +427,15 @@ int kv_nvme_delete_async(uint64_t handle, const kv_pair *kv) {
 
 	nvme = (kv_nvme_t *)handle;
 
-	core_id = sched_getcpu();
-
-	if(core_id < 0) {
-		KVNVME_WARN("Could not get the CPU Core ID, Using Default 0");
-		core_id = 0;
+	if(qid < 0){
+		qid = sched_getcpu();
+		if(qid < 0) {
+			KVNVME_WARN("Could not get the CPU Core ID, Using Default 0");
+			qid = 0;
+		}
 	}
 
-	queue_is_sync = ((nvme->io_queue_type[core_id] == SYNC_IO_QUEUE) ? 1 : 0);
-
+	queue_is_sync = ((nvme->io_queue_type[qid] == SYNC_IO_QUEUE) ? 1 : 0);
 	if(queue_is_sync) {
 		//KVNVME_ERR("I/O Queue supports only Sync, Please do Sync Delete");
 
@@ -485,7 +444,7 @@ int kv_nvme_delete_async(uint64_t handle, const kv_pair *kv) {
 	}
 
 	if(nvme->dev_ops.delete_async) {
-		ret = nvme->dev_ops.delete_async(nvme, kv, core_id);
+		ret = nvme->dev_ops.delete_async(nvme, kv, qid);
 	} else {
 		KVNVME_ERR("This function is not supported by the Device");
 
@@ -496,23 +455,15 @@ int kv_nvme_delete_async(uint64_t handle, const kv_pair *kv) {
 	return ret;
 }
 
-uint32_t kv_nvme_iterate_open(uint64_t handle, uint32_t bitmask, uint32_t prefix, uint8_t iterate_type){
-	uint32_t ret = KV_ERR_DD_INVALID_PARAM;
-	int core_id = 0;
+int kv_nvme_exist(uint64_t handle, int qid, const kv_pair* kv) {
+	int ret = KV_ERR_DD_INVALID_PARAM;
+	unsigned int queue_is_async = 0;
 	kv_nvme_t *nvme = NULL;
-	uint32_t iterator = KV_INVALID_ITERATE_HANDLE;
 
 	ENTER();
 
-	if(!handle){
+	if(!handle) {
 		KVNVME_ERR("Invalid handle passed");
-
-		LEAVE();
-		return ret;
-	}
-	
-	if(iterate_type != KV_KEY_ITERATE && iterate_type != KV_KEY_ITERATE_WITH_RETRIEVE && iterate_type != KV_KEY_ITERATE_WITH_DELETE){
-		KVNVME_ERR("Invalid iterate type");
 
 		LEAVE();
 		return ret;
@@ -520,15 +471,114 @@ uint32_t kv_nvme_iterate_open(uint64_t handle, uint32_t bitmask, uint32_t prefix
 
 	nvme = (kv_nvme_t *)handle;
 
-	core_id = sched_getcpu();
+	if(qid < 0){
+		qid = sched_getcpu();
+		if(qid < 0) {
+			KVNVME_WARN("Could not get the CPU Core ID, Using Default 0");
+			qid = 0;
+		}
+	}
 
-	if(core_id < 0) {
+	queue_is_async = ((nvme->io_queue_type[qid] == ASYNC_IO_QUEUE) ? 1 : 0);
+	if(queue_is_async) {
+		//KVNVME_ERR("I/O Queue supports only Async, Please do Async Delete");
+
+		LEAVE();
+		return KV_ERR_DD_INVALID_QUEUE_TYPE;
+	}
+
+	if(nvme->dev_ops.exist) {
+		ret = nvme->dev_ops.exist(nvme, kv, qid);
+	} else {
+		KVNVME_ERR("This function is not supported by the Device");
+
+		ret = KV_ERR_DD_UNSUPPORTED_CMD;
+	}
+
+	LEAVE();
+	return ret;
+}
+
+int kv_nvme_exist_async(uint64_t handle, int qid, const kv_pair* kv) {
+	int ret = KV_ERR_DD_INVALID_PARAM;
+	unsigned int queue_is_sync = 0;
+	kv_nvme_t *nvme = NULL;
+
+	ENTER();
+
+	if(!handle) {
+		KVNVME_ERR("Invalid handle passed");
+
+		LEAVE();
+		return ret;
+	}
+
+	nvme = (kv_nvme_t *)handle;
+
+	if(qid < 0){
+		qid = sched_getcpu();
+		if(qid < 0) {
+			KVNVME_WARN("Could not get the CPU Core ID, Using Default 0");
+			qid = 0;
+		}
+	}
+
+	queue_is_sync = ((nvme->io_queue_type[qid] == SYNC_IO_QUEUE) ? 1 : 0);
+	if(queue_is_sync) {
+		//KVNVME_ERR("I/O Queue supports only Async, Please do Async Delete");
+
+		LEAVE();
+		return KV_ERR_DD_INVALID_QUEUE_TYPE;
+	}
+
+	if(nvme->dev_ops.exist_async) {
+		ret = nvme->dev_ops.exist_async(nvme, kv, qid);
+	} else {
+		KVNVME_ERR("This function is not supported by the Device");
+
+		ret = KV_ERR_DD_UNSUPPORTED_CMD;
+	}
+
+	LEAVE();
+	return ret;
+}
+
+uint32_t kv_nvme_iterate_open(uint64_t handle, uint8_t keyspace_id, uint32_t bitmask, uint32_t prefix, uint8_t iterate_type){
+	uint32_t ret = KV_ERR_DD_INVALID_PARAM;
+	int qid = 0;
+	kv_nvme_t *nvme = NULL;
+	uint32_t iterator = KV_INVALID_ITERATE_HANDLE;
+
+	ENTER();
+
+	if(!handle){
+		KVNVME_ERR("Invalid handle passed");
+		LEAVE();
+		return ret;
+	}
+	
+	if(iterate_type != KV_KEY_ITERATE && iterate_type != KV_KEY_ITERATE_WITH_RETRIEVE && iterate_type != KV_KEY_ITERATE_WITH_DELETE){
+		KVNVME_ERR("Invalid iterate type");
+		LEAVE();
+		return ret;
+	}
+
+	if(keyspace_id != KV_KEYSPACE_IODATA && keyspace_id != KV_KEYSPACE_METADATA){
+		KVNVME_ERR("Invalid keyspace id");
+		LEAVE();
+		return ret;
+	}
+
+	nvme = (kv_nvme_t *)handle;
+
+	qid = sched_getcpu();
+	if(qid < 0) {
 		KVNVME_WARN("Could not get the CPU Core ID, Using Default 0");
-		core_id = 0;
+		qid = 0;
 	}
 
 	if(nvme->dev_ops.iterate_open) {
-		iterator = nvme->dev_ops.iterate_open(nvme, bitmask, prefix, iterate_type, core_id);
+		iterator = nvme->dev_ops.iterate_open(nvme, keyspace_id, bitmask, prefix, iterate_type, qid);
 		LEAVE();
 		return iterator;
 	} else {
@@ -542,7 +592,7 @@ uint32_t kv_nvme_iterate_open(uint64_t handle, uint32_t bitmask, uint32_t prefix
 
 int kv_nvme_iterate_close(uint64_t handle, const uint8_t iterator){
 	int ret = KV_ERR_DD_INVALID_PARAM;
-	int core_id = 0;
+	int qid = 0;
 	kv_nvme_t *nvme = NULL;
 
 	ENTER();
@@ -556,15 +606,14 @@ int kv_nvme_iterate_close(uint64_t handle, const uint8_t iterator){
 
 	nvme = (kv_nvme_t *)handle;
 
-	core_id = sched_getcpu();
-
-	if(core_id < 0) {
+	qid = sched_getcpu();
+	if(qid < 0) {
 		KVNVME_WARN("Could not get the CPU Core ID, Using Default 0");
-		core_id = 0;
+		qid = 0;
 	}
 
 	if(nvme->dev_ops.iterate_close) {
-		ret = nvme->dev_ops.iterate_close(nvme, iterator, core_id);
+		ret = nvme->dev_ops.iterate_close(nvme, iterator, qid);
 	} else {
 		KVNVME_ERR("This function is not supported by the Device");
 
@@ -575,9 +624,8 @@ int kv_nvme_iterate_close(uint64_t handle, const uint8_t iterator){
 	return ret;
 }
 
-int kv_nvme_iterate_read(uint64_t handle, kv_iterate* it){
+int kv_nvme_iterate_read(uint64_t handle, int qid, kv_iterate* it){
 	int ret = KV_ERR_DD_INVALID_PARAM;
-	int core_id = 0;
 	unsigned int queue_is_async = 0;
 	kv_nvme_t *nvme = NULL;
 
@@ -592,15 +640,15 @@ int kv_nvme_iterate_read(uint64_t handle, kv_iterate* it){
 
 	nvme = (kv_nvme_t *)handle;
 
-	core_id = sched_getcpu();
-
-	if(core_id < 0) {
-		KVNVME_WARN("Could not get the CPU Core ID, Using Default 0");
-		core_id = 0;
+	if(qid < 0){
+		qid = sched_getcpu();
+		if(qid < 0) {
+			KVNVME_WARN("Could not get the CPU Core ID, Using Default 0");
+			qid = 0;
+		}
 	}
 
-	queue_is_async = ((nvme->io_queue_type[core_id] == ASYNC_IO_QUEUE) ? 1 : 0);
-
+	queue_is_async = ((nvme->io_queue_type[qid] == ASYNC_IO_QUEUE) ? 1 : 0);
 	if(queue_is_async) {
 		//KVNVME_ERR("I/O Queue supports only Async, Please do Async Read");
 
@@ -608,15 +656,14 @@ int kv_nvme_iterate_read(uint64_t handle, kv_iterate* it){
 		return KV_ERR_DD_INVALID_QUEUE_TYPE;
 	}
 
-	ret = nvme->dev_ops.iterate_read(nvme, it, core_id);
+	ret = nvme->dev_ops.iterate_read(nvme, it, qid);
 
 	LEAVE();
 	return ret;
 }
 
-int kv_nvme_iterate_read_async(uint64_t handle, kv_iterate* it) {
+int kv_nvme_iterate_read_async(uint64_t handle, int qid, kv_iterate* it) {
 	int ret = KV_ERR_DD_INVALID_PARAM;
-	int core_id = 0;
 	unsigned int queue_is_sync = 0;
 	kv_nvme_t *nvme = NULL;
 
@@ -631,15 +678,15 @@ int kv_nvme_iterate_read_async(uint64_t handle, kv_iterate* it) {
 
 	nvme = (kv_nvme_t *)handle;
 
-	core_id = sched_getcpu();
-
-	if(core_id < 0) {
-		KVNVME_WARN("Could not get the CPU Core ID, Using Default 0");
-		core_id = 0;
+	if(qid < 0){
+		qid = sched_getcpu();
+		if(qid < 0) {
+			KVNVME_WARN("Could not get the CPU Core ID, Using Default 0");
+			qid = 0;
+		}
 	}
 
-	queue_is_sync = ((nvme->io_queue_type[core_id] == SYNC_IO_QUEUE) ? 1 : 0);
-
+	queue_is_sync = ((nvme->io_queue_type[qid] == SYNC_IO_QUEUE) ? 1 : 0);
 	if(queue_is_sync) {
 		//KVNVME_ERR("I/O Queue supports only Sync, Please do Sync Read");
 
@@ -647,13 +694,13 @@ int kv_nvme_iterate_read_async(uint64_t handle, kv_iterate* it) {
 		return KV_ERR_DD_INVALID_QUEUE_TYPE;
 	}
 
-	ret = nvme->dev_ops.iterate_read_async(nvme, it, core_id);
+	ret = nvme->dev_ops.iterate_read_async(nvme, it, qid);
 
 	LEAVE();
 	return ret;
 }
 
-int _kv_nvme_iterate_info(uint64_t handle, kv_iterate_handle_info* info, int nr_handle) {
+int kv_nvme_iterate_info(uint64_t handle, kv_iterate_handle_info* info, int nr_handle) {
         int ret = KV_ERR_DD_INVALID_PARAM;
         int handle_info_size = 16;
         int log_id = 0xd0;
@@ -683,13 +730,16 @@ int _kv_nvme_iterate_info(uint64_t handle, kv_iterate_handle_info* info, int nr_
                 info[i].handle_id = (*(uint8_t*)(logbuf + offset + 0));
                 info[i].status = (*(uint8_t*)(logbuf + offset + 1));
                 info[i].type = (*(uint8_t*)(logbuf + offset + 2));
-                info[i].reserved1 = (*(uint8_t*)(logbuf + offset + 3));
+                info[i].keyspace_id = (*(uint8_t*)(logbuf + offset + 3));
 
                 info[i].prefix = (*(uint32_t*)(logbuf + offset + 4));
                 info[i].bitmask = (*(uint32_t*)(logbuf + offset + 8));
-                info[i].reserved2 = (*(uint32_t*)(logbuf + offset + 12));
-                KVNVME_DEBUG("handle_id=%d status=%d type=%d prefix=%08x bitmask=%08x\n",
-                        info[i].handle_id, info[i].status, info[i].type, info[i].prefix, info[i].bitmask);
+		info[i].is_eof = (*(uint8_t*)(logbuf + offset + 12));
+                info[i].reserved[0] = (*(uint8_t*)(logbuf + offset + 13));
+                info[i].reserved[1] = (*(uint8_t*)(logbuf + offset + 14));
+                info[i].reserved[2] = (*(uint8_t*)(logbuf + offset + 15));
+                KVNVME_DEBUG("handle_id=%d status=%d type=%d prefix=%08x bitmask=%08x is_eof=%d\n",
+                        info[i].handle_id, info[i].status, info[i].type, info[i].prefix, info[i].bitmask, info[i].is_eof);
         }
 
         /*
@@ -708,11 +758,7 @@ int _kv_nvme_iterate_info(uint64_t handle, kv_iterate_handle_info* info, int nr_
         return ret;
 }
 
-int kv_nvme_iterate_info(uint64_t handle, kv_iterate_handle_info* info, int nr_handle) {
-	return _kv_nvme_iterate_info(handle, info, nr_handle);
-}
-
-int kv_nvme_format(uint64_t handle) {
+int kv_nvme_format(uint64_t handle, int erase_user_data){
 	int ret = KV_ERR_DD_INVALID_PARAM;
 	kv_nvme_t *nvme = NULL;
 
@@ -727,7 +773,7 @@ int kv_nvme_format(uint64_t handle) {
 
 	nvme = (kv_nvme_t *)handle;
 
-	ret = nvme->dev_ops.format(nvme);
+	ret = nvme->dev_ops.format(nvme, erase_user_data);
 
 	LEAVE();
 	return ret;
@@ -917,6 +963,28 @@ uint32_t kv_nvme_get_sector_size(uint64_t handle) {
 	return sector_size;
 }
 
+uint64_t kv_nvme_get_num_sectors(uint64_t handle) {
+	uint64_t num_sectors = 0;
+	ENTER();
+
+	if(!handle){
+		KVNVME_ERR("Invalid handle passed");
+		LEAVE();
+		return num_sectors;
+	}
+
+	kv_nvme_t *nvme = (kv_nvme_t *)handle;
+
+	num_sectors = spdk_nvme_ns_get_num_sectors(nvme->ns);
+
+	if(!num_sectors) {
+		KVNVME_ERR("Could not get the Number of Sectors in Namespace");
+	}
+
+	LEAVE();
+	return num_sectors;
+}
+
 uint16_t kv_nvme_get_io_queue_size(uint64_t handle) {
 	uint16_t queue_size = 0;
 
@@ -941,7 +1009,7 @@ enum qd_op{
 	DECREASE,
 };
 
-static uint16_t _kv_nvme_qd_operation(uint64_t handle, int core_id, int qd_op){
+static uint16_t _kv_qd_operation(uint64_t handle, int qid, int qd_op){
 	int current_qd = 0;
 
 	ENTER();
@@ -953,7 +1021,7 @@ static uint16_t _kv_nvme_qd_operation(uint64_t handle, int core_id, int qd_op){
 	}
 
 	kv_nvme_t* nvme = (kv_nvme_t *)handle;
-	struct spdk_nvme_qpair* qpair = nvme->qpairs[core_id];
+	struct spdk_nvme_qpair* qpair = nvme->qpairs[qid];
 	if(!qpair) {
 		KVNVME_ERR("No Matching I/O Queue found for the Passed CPU Core ID");
 		LEAVE();
@@ -961,7 +1029,7 @@ static uint16_t _kv_nvme_qd_operation(uint64_t handle, int core_id, int qd_op){
 	}
 
 
-	pthread_spin_lock(&qpair->q_lock);
+	pthread_spin_lock(&qpair->sq_lock);
 	switch(qd_op){
 		case INCREASE:
 			current_qd = ++qpair->current_qd;
@@ -974,21 +1042,21 @@ static uint16_t _kv_nvme_qd_operation(uint64_t handle, int core_id, int qd_op){
 			current_qd = qpair->current_qd;
 			break;
 	}
-	pthread_spin_unlock(&qpair->q_lock);
+	pthread_spin_unlock(&qpair->sq_lock);
 
 	LEAVE();
 	return current_qd;
 }
 
-uint16_t kv_nvme_get_current_qd(uint64_t handle, int core_id){
-	return _kv_nvme_qd_operation(handle, core_id, READ);
+uint16_t kv_get_current_qd(uint64_t handle, int qid){
+	return _kv_qd_operation(handle, qid, READ);
 }
 
-uint16_t kv_nvme_increase_current_qd(uint64_t handle, int core_id){
-	return _kv_nvme_qd_operation(handle, core_id, INCREASE);
+uint16_t kv_increase_current_qd(uint64_t handle, int qid){
+	return _kv_qd_operation(handle, qid, INCREASE);
 }
 
-uint16_t kv_nvme_decrease_current_qd(uint64_t handle, int core_id){
-	return _kv_nvme_qd_operation(handle, core_id, DECREASE);
+uint16_t kv_decrease_current_qd(uint64_t handle, int qid){
+	return _kv_qd_operation(handle, qid, DECREASE);
 }
 

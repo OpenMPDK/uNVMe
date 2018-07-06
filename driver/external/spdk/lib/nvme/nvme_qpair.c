@@ -428,7 +428,8 @@ nvme_qpair_init(struct spdk_nvme_qpair *qpair, uint16_t id,
 	STAILQ_INIT(&qpair->queued_req);
 	pthread_spin_init(&qpair->req_lock, 0);
 
-	pthread_spin_init(&qpair->q_lock, 0);
+	pthread_spin_init(&qpair->sq_lock, 0);
+	pthread_spin_init(&qpair->cq_lock, 0);
 	qpair->current_qd = 0;
 
 	req_size_padded = (sizeof(struct nvme_request) + 63) & ~(size_t)63;

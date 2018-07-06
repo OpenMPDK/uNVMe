@@ -1,0 +1,114 @@
+#!/bin/bash
+#
+# Copyright 2015 PMC-Sierra, Inc.
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
+# MA  02110-1301, USA.
+#
+#   Author: Stephen Bates <stephen.bates@pmcs.com>
+#
+#   Description:
+#     A shell script that calls the NVMe CLI multiple times to gather
+#     latency data. Consider this a poor man's iometer or fio for QD=1
+#     analysis. Of course this is below the file-system and block
+#     layer so is a best case measurement.
+#
+
+DEVICE=
+WRITE=false
+COUNT=10
+DATA_SIZE=4096
+METADATA_SIZE=64
+
+RAND_BASE=temp.rand
+RAND_WFILE=${RAND_BASE}.write
+RAND_RFILE=${RAND_BASE}.read
+OUTPUT=latency.dat
+
+green=$(tput bold)$(tput setaf 2)
+red=$(tput bold)$(tput setaf 1)
+rst=$(tput sgr0)
+
+while getopts ":d:n:w" opt; do
+  case $opt in
+    d)
+      DEVICE=${OPTARG}
+      ;;
+    n)
+      COUNT=${OPTARG}
+      ;;
+    w)
+      echo "WARNING: Write mode enabled, this might trash your drive!"
+      WRITE=true
+      ;;
+    \?)
+      echo "Invalid option: -$OPTARG" >&2
+      exit 1
+      ;;
+    :)
+      echo "Option -$OPTARG requires an argument." >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [ "$COUNT" == "0" ]; then
+    echo "Count can not be 0"
+    exit 1
+fi
+
+if [ -z "$DEVICE" ]; then
+     echo "regress: You must specify a NVMe device using -d"
+     exit 1
+fi
+
+function run_test {
+    $* | grep -i latency >> ${OUTPUT} 2>&1
+    if (( $? )); then
+        echo ${red}"FAILED!"${rst}
+        echo "Failed running command: "
+        echo  "   $*"
+        exit 1
+    fi
+}
+
+rm -f ${OUTPUT} > /dev/null || exit -1
+make clean   > /dev/null || exit -1
+make install > /dev/null || exit -1
+
+for i in `seq 1 ${COUNT}`;
+do
+    if $WRITE ; then
+        dd if=/dev/urandom of=${RAND_WFILE} bs=${DATA_SIZE} count=1
+        run_test nvme write ${DEVICE} --start-block=0 --block-count=0 \
+            --metadata-size=${METADATA_SIZE} --data-size=${DATA_SIZE} \
+            --data ${RAND_WFILE} --latency
+        rm ${RAND_WFILE} > /dev/null
+    else
+        run_test nvme read ${DEVICE} --start-block=0 --block-count=0 \
+            --metadata-size=${METADATA_SIZE} --data-size=${DATA_SIZE} \
+            --data ${RAND_RFILE} --latency
+        rm ${RAND_RFILE} > /dev/null
+    fi
+done
+
+# Calculate average latency
+SUM=0
+for i in `cat ${OUTPUT} | awk '{print $3}' | xargs`
+do
+    SUM=$(($SUM + $i))
+done
+AVERAGE=$(echo "scale=2; $SUM/$COUNT" | bc -l)
+echo "Average Latency: $AVERAGE us"

@@ -55,9 +55,11 @@ extern int _kv_retrieve(uint64_t handle, kv_pair* kv);
 extern int _kv_retrieve_async(uint64_t handle, kv_pair* kv);
 extern int _kv_delete(uint64_t handle, kv_pair* kv);
 extern int _kv_delete_async(uint64_t handle, kv_pair* kv);
+extern int _kv_exist(uint64_t handle, kv_pair* kv);
+extern int _kv_exist_async(uint64_t handle, kv_pair* kv);
 extern int _kv_append(uint64_t handle, kv_pair* kv);
 
-extern uint32_t _kv_iterate_open(uint64_t handle, const uint32_t bitmask, const uint32_t prefix, const uint8_t iterate_type);
+extern uint32_t _kv_iterate_open(uint64_t handle, const uint8_t keyspace_id, const uint32_t bitmask, const uint32_t prefix, const uint8_t iterate_type);
 extern int _kv_iterate_close(uint64_t handle, const uint8_t iterator);
 extern int _kv_iterate_read(uint64_t handle, kv_iterate* it);
 extern int _kv_iterate_read_async(uint64_t handle, kv_iterate* it);
@@ -86,12 +88,20 @@ int kv_delete_async(uint64_t handle, kv_pair* kv){
 	return _kv_delete_async(handle, kv);
 }
 
+int kv_exist(uint64_t handle, kv_pair* kv){
+	return  _kv_exist(handle, kv);
+}
+
+int kv_exist_async(uint64_t handle, kv_pair* kv){
+	return  _kv_exist_async(handle, kv);
+}
+
 int kv_append(uint64_t handle, kv_pair *kv){
 	return _kv_append(handle, kv);
 }
 
-uint32_t kv_iterate_open(uint64_t handle, const uint32_t bitmask, const uint32_t prefix, const uint8_t iterate_type){
-	return _kv_iterate_open(handle, bitmask, prefix, iterate_type);
+uint32_t kv_iterate_open(uint64_t handle, const uint8_t keyspace_id, const uint32_t bitmask, const uint32_t prefix, const uint8_t iterate_type){
+	return _kv_iterate_open(handle, keyspace_id, bitmask, prefix, iterate_type);
 }
 
 int kv_iterate_close(uint64_t handle, const uint8_t iterator){
@@ -113,14 +123,14 @@ int kv_get_active_iterator(uint64_t handle, uint32_t* nr_open_handle,  uint8_t* 
 	return 0;
 }
 
-int kv_format_device(uint64_t handle){
+int kv_format_device(uint64_t handle, int erase_user_data){
 	if(handle == 0){
 		fprintf(stderr, "[%s] Invalid Parameter\n", __FUNCTION__);
 		return KV_ERR_SDK_INVALID_PARAM;
 	}
 
 	int ret = KV_SUCCESS;
-	ret = kv_nvme_format(handle);
+	ret = kv_nvme_format(handle, erase_user_data);
 	if (ret!=KV_SUCCESS){
 		fprintf(stderr, "[%s] ret = %d\n", __FUNCTION__, ret);
 		return KV_ERR_IO; //need to update
@@ -128,24 +138,6 @@ int kv_format_device(uint64_t handle){
 
 	return ret;
 }
-
-int kv_exist(uint64_t handle, kv_key_list *key_list, kv_value *result){
-	int ret = KV_SUCCESS;
-	if(handle == 0 || !result || !key_list || !key_list->buffer || key_list->key_number == 0){
-		fprintf(stderr, "[%s] Invalid Parameter\n", __FUNCTION__);
-		return KV_ERR_SDK_INVALID_PARAM;
-	}
-
-	ret = kv_nvme_exist(handle, key_list, result);
-	log_debug(KV_LOG_DEBUG, "[kv_nvme_exist] ret=%d\n",ret);
-	if(ret != KV_SUCCESS){
-		ret = KV_ERR_IO;
-		goto err;
-	}
-err:
-	return ret;
-}
-
 
 /*
 kv_get_core_id : returns the number of the CPU on which the calling
@@ -223,6 +215,13 @@ uint32_t kv_get_sector_size(uint64_t handle){
 	return kv_nvme_get_sector_size(handle);
 }
 
+uint64_t kv_get_num_sectors(uint64_t handle){
+	if (handle == 0) {
+		return KV_ERR_SDK_INVALID_PARAM;
+	}
+	return kv_nvme_get_num_sectors(handle);
+}
+
 int kv_get_log_page(uint64_t handle, uint8_t log_id, void* buffer, uint32_t buffer_size) {
 	if (handle == 0) {
 		return KV_ERR_SDK_INVALID_PARAM;
@@ -248,5 +247,13 @@ int kv_is_sdk_initialized(){
 
 void kv_sdk_info(){
 	kv_nvme_sdk_info();
+}
+
+void kv_process_completion(uint64_t handle){
+	kv_nvme_process_completion(handle);
+}
+
+void kv_process_completion_queue(uint64_t handle, uint32_t queue_id){
+	kv_nvme_process_completion_queue(handle, queue_id);
 }
 

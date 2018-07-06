@@ -8,7 +8,7 @@ C_SRCS := udd_perf_async.c $(COMMON_PATH)/EagleHashIP.c $(COMMON_PATH)/latency_s
 
 LIBS += $(KV_DD_LIB) $(KV_LIBS)
 
-CFLAGS += -O0 -I/home/test/jhim/KV_DD/user/spdk/include -march=native -m64 -D_GNU_SOURCE -I../../include -I$(COMMON_PATH) -std=gnu99
+CFLAGS += -O2  -march=native -m64 -D_GNU_SOURCE -I../../include -I$(COMMON_PATH) -std=gnu99
 
 APP = udd_perf_async
 

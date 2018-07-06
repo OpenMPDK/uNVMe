@@ -913,7 +913,7 @@ spdk_bdev_io_complete(struct spdk_bdev_io *bdev_io, enum spdk_bdev_io_status sta
 		 * Defer completion via an event to avoid potential infinite recursion if the
 		 * user's completion callback issues a new I/O.
 		 */
-		spdk_event_call(spdk_event_allocate(spdk_env_get_current_core(),
+		spdk_event_call(spdk_event_allocate(0,
 						    bdev_io_deferred_completion,
 						    bdev_io,
 						    (void *)status));

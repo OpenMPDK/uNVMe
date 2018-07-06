@@ -43,6 +43,9 @@
 #include "spdk/conf.h"
 #include "spdk/trace.h"
 
+#include "kv_apis.h"
+#include "kv_types.h"
+
 #define SPDK_APP_DEFAULT_LOG_FACILITY	"local7"
 #define SPDK_APP_DEFAULT_LOG_PRIORITY	"info"
 
@@ -217,11 +220,15 @@ spdk_app_opts_init(struct spdk_app_opts *opts)
 	opts->dpdk_mem_channel = SPDK_APP_DPDK_DEFAULT_MEM_CHANNEL;
 	opts->reactor_mask = NULL;
 	opts->max_delay_us = 0;
+
+	opts->init_from = 0;
+	opts->options = NULL;
 }
 
 void
 spdk_app_init(struct spdk_app_opts *opts)
 {
+#if 0
 	struct spdk_conf		*config;
 	struct spdk_conf_section	*sp;
 	struct sigaction	sigact;
@@ -231,7 +238,13 @@ spdk_app_init(struct spdk_app_opts *opts)
 	uint64_t		tpoint_group_mask;
 	char			*end;
 	struct spdk_env_opts env_opts = {};
+#else
+	struct sigaction	sigact;
+	sigset_t		signew;
+	int			rc;
+#endif
 
+#if 0
 	if (opts->enable_coredump) {
 		struct rlimit core_limits;
 
@@ -315,6 +328,10 @@ spdk_app_init(struct spdk_app_opts *opts)
 	env_opts.dpdk_mem_size = opts->dpdk_mem_size;
 
 	spdk_env_init(&env_opts);
+#else
+	memset(&g_spdk_app, 0, sizeof(g_spdk_app));
+	g_spdk_app.shutdown_cb = opts->shutdown_cb;
+#endif
 
 	/*
 	 * If mask not specified on command line or in configuration file,
@@ -323,7 +340,9 @@ spdk_app_init(struct spdk_app_opts *opts)
 	 */
 	if (spdk_reactors_init(opts->max_delay_us)) {
 		SPDK_ERRLOG("Invalid reactor mask.\n");
+#if 0
 		spdk_conf_free(g_spdk_app.config);
+#endif
 		exit(EXIT_FAILURE);
 	}
 
@@ -336,7 +355,9 @@ spdk_app_init(struct spdk_app_opts *opts)
 	rc = sigaction(SIGPIPE, &sigact, NULL);
 	if (rc < 0) {
 		SPDK_ERRLOG("sigaction(SIGPIPE) failed\n");
+#if 0
 		spdk_conf_free(g_spdk_app.config);
+#endif
 		exit(EXIT_FAILURE);
 	}
 
@@ -349,7 +370,9 @@ spdk_app_init(struct spdk_app_opts *opts)
 		rc = sigaction(SIGINT, &sigact, NULL);
 		if (rc < 0) {
 			SPDK_ERRLOG("sigaction(SIGINT) failed\n");
+#if 0
 			spdk_conf_free(g_spdk_app.config);
+#endif
 			exit(EXIT_FAILURE);
 		}
 		sigaddset(&signew, SIGINT);
@@ -381,6 +404,7 @@ spdk_app_init(struct spdk_app_opts *opts)
 	sigaddset(&signew, SIGHUP);
 	pthread_sigmask(SIG_SETMASK, &signew, NULL);
 
+#if 0
 	if (opts->shm_id >= 0) {
 		snprintf(shm_name, sizeof(shm_name), "/%s_trace.%d", opts->name, opts->shm_id);
 	} else {
@@ -410,11 +434,14 @@ spdk_app_init(struct spdk_app_opts *opts)
 			spdk_trace_set_tpoint_group_mask(tpoint_group_mask);
 		}
 	}
+#endif
 
 	rc = spdk_subsystem_init();
 	if (rc < 0) {
 		SPDK_ERRLOG("spdk_subsystem_init() failed\n");
+#if 0
 		spdk_conf_free(g_spdk_app.config);
+#endif
 		exit(EXIT_FAILURE);
 	}
 }
@@ -424,12 +451,17 @@ spdk_app_fini(void)
 {
 	int rc;
 
+#if 0
 	rc = spdk_subsystem_fini();
 	spdk_trace_cleanup();
 	spdk_reactors_fini();
 	spdk_conf_free(g_spdk_app.config);
 	spdk_close_log();
 
+#else
+	rc = spdk_subsystem_fini();
+	spdk_reactors_fini();
+#endif
 	return rc;
 }
 

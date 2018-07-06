@@ -39,7 +39,7 @@
 #define KV_APIS_C_H
 
 #include "kv_types.h"
-
+#include "spdk/env.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -59,6 +59,16 @@ extern "C" {
 int kv_sdk_init(int init_from, void *option);
 
 /**
+ * @brief Initializes KV SSD and KV cache with spdk_env_opts structure
+ * @param init_from types of initializing SDK
+ * @param option configuration file's path or pointer of config structure
+ * @param spdk_opts spdk config structure
+ * @return KV_SUCCESS
+ * @return KV_ERR_SDK_OPEN
+ */
+int kv_sdk_init_with_spdk_opts(int init_from, void *option, struct spdk_env_opts *spdk_opts);
+
+/**
  * @brief  Load init option from file(json) or in-memory configuration
  * @return KV_SUCCESS
  * @return KV_ERR_SDK_OPTION_LOAD
@@ -70,14 +80,14 @@ int kv_sdk_load_option(kv_sdk *sdk_opt, char* log_path);
  * @return KV_SUCCESS
  * @return KV_ERR_SDK_CLOSE
  */
-int kv_sdk_finalize();
+int kv_sdk_finalize(void);
 
 /**
  * @brief Returns CPU ID
  * @return >=0: # of CPU ID
  * @return  -1: error
  */
-int kv_get_core_id();
+int kv_get_core_id(void);
 
 /**
  * @brief Returns the total size of the KV SSD in bytes
@@ -114,6 +124,15 @@ uint64_t kv_get_waf(uint64_t handle);
  * @return KV_ERR_SDK_INVALID_PARAM: invalid parameter
  */
 uint32_t kv_get_sector_size(uint64_t handle);
+
+/*
+* @brief Returns the number of sectors in the KV SSD
+* @param handle device handle
+* @return >0: number of sectors in the device
+* @return 0: fail to get number of sectors in the device
+* @return KV_ERR_SDK_INVALID_PARAM: invalid parameter
+*/
+uint64_t kv_get_num_sectors(uint64_t handle);
 
 /**
  * @brief Returns the result of get log page Admin Command
@@ -241,13 +260,14 @@ int kv_delete_async(uint64_t handle, kv_pair *kv);
 /**
  * @brief open iterate handle
  * @param handle Handle to the KV NVMe Device
+ * @param keyspace_id keyspace_id
  * @param bitmask  bitmask 
  * @param prefix  prefix of matching key set
  * @param iterate_type one of four types (key-only, key-value, key-only with delete, key-value with delete )
  * @return > 0 : iterator id opened
  * @return = UINT8_MAX: fail to open iterator
  */
-uint32_t kv_iterate_open(uint64_t handle, const uint32_t bitmask, const uint32_t prefix, const uint8_t iterate_type);
+uint32_t kv_iterate_open(uint64_t handle, const uint8_t keyspace_id, const uint32_t bitmask, const uint32_t prefix, const uint8_t iterate_type);
 
 
 /**
@@ -288,9 +308,9 @@ int kv_iterate_read_async(uint64_t handle, kv_iterate* it);
 int kv_iterate_info(uint64_t handle, kv_iterate_handle_info* info, int nr_handle);
 
 /**
- * @brief Appends value to existing value by given key(TBD)
- * @param qid CPU(=I/O queue) ID
+ * @brief Appends value to existing value by given key(deprecated)
  * @param kv kv_pair structure
+ * @return (deprecated. 2018.05.31) will return KV_ERR_DD_UNSUPPORTED_CMD
  * @return KV_SUCCESS
  * @return KV_ERR_INVALID_VALUE_SIZE
  * @return KV_ERR_INVALID_KEY_SIZE
@@ -308,39 +328,34 @@ int kv_iterate_info(uint64_t handle, kv_iterate_handle_info* info, int nr_handle
 int kv_append(uint64_t handle, kv_pair *kv);
 
 /**
- * @brief Checks if given keys exist and returns status(TBD)
- * @param qid CPU(=I/O queue) ID
- * @param key_list kv_key_list which contains a set of keys
- * @param result output buffer
+ * @brief Checks if given key exist and returns status(status code=0 : exist, 0x10=not exist)
+ * @param kv kv_pair structure
  * @return KV_SUCCESS
+ * @return KV_ERR_NOT_EXIST_KEY
  * @return KV_ERR_SDK_INVALID_PARAM
  * @return KV_ERR_IO
- * @return KV_ERR_BUFFER
  */
-int kv_exist(uint64_t handle, kv_key_list *key_list, kv_value *result);
+int kv_exist(uint64_t handle, kv_pair* kv);
 
 /**
- * @brief Returns all keys matching given bit pattern(TBD)
- * @param qid CPU(=I/O queue) ID
- * @param iterate_option kv_iterate structure
- * @param result output buffer
+ * @brief Checks if given key exist and returns status in async manner (status code=0 : exist, 0x10=not exist)
+ * @param kv kv_pair structure
  * @return KV_SUCCESS
- * @return KV_WRN_MORE
+ * @return KV_ERR_NOT_EXIST_KEY
  * @return KV_ERR_SDK_INVALID_PARAM
  * @return KV_ERR_IO
- * @return KV_ERR_BUFFER
  */
-//int kv_iterate(uint64_t handle, kv_iterate_options *iterate_option, kv_value *result);
-
+int kv_exist_async(uint64_t handle, kv_pair* kv);
 
 /**
  * @brief Format all KV SSDs
  * @param handle device handle
+ * @param erase_user_data 0=erase map only, 1=erase user data
  * @return KV_SUCCESS
  * @return KV_ERR_SDK_INVALID_PARAM
  * @return KV_ERR_IO
  */
-int kv_format_device(uint64_t handle);
+int kv_format_device(uint64_t handle, int erase_user_data);
 
 /**
  * @brief Returns I/O Queue type for current (I/O)thread
@@ -386,7 +401,7 @@ int kv_get_cpus_on_device(uint64_t handle, int* nr_core, int* arr_core);
 	when not initialized(=return 0), most of SDK APIs will not work
  @return 1 = initialized , 0 = not initialized
 */
-int kv_is_sdk_initialized();
+int kv_is_sdk_initialized(void);
 
 /**
  * @breif Returns a KV SSD device id for the given handle
@@ -414,6 +429,18 @@ bool context_switch_sync_to_async(int did);
  */
 void kv_sdk_info(void);
 
+/**
+ * @brief process completion on given ssd handle
+ * @param handle device handle
+ */
+void kv_process_completion(uint64_t handle);
+
+/**
+ * @brief process completion on given queue id of ssd handle
+ * @param handle device handle
+ * @param queue_id ID of an I/O Queue to process
+ */
+void kv_process_completion_queue(uint64_t handle, uint32_t queue_id);
 
 #ifdef __cplusplus
 } // extern "C"

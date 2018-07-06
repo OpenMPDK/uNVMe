@@ -240,7 +240,6 @@ unsigned int uniform(unsigned int rangeLow, unsigned int rangeHigh, unsigned int
         return myRand_scaled;
 }
 
-
 void kv_callback_fn(kv_pair *kv, unsigned int result, unsigned int status) {
 	if (status != KV_SUCCESS){
 		if (status != KV_ERR_NOT_EXIST_KEY){ //deleting unwritten key is allowed
@@ -261,67 +260,35 @@ void kv_callback_fn(kv_pair *kv, unsigned int result, unsigned int status) {
 	pthread_mutex_unlock(&tpd->mutex);
 }
 
-int kv_nop(uint64_t handle, kv_pair* kv) {
-	return 0;
+#define KV_PERF_SYNC_IO(op, ret, handle, qid, kv) \
+{\
+	if (g_low_cmd_mode) {\
+		ret = kv_nvme_##op(handle, qid, kv);\
+	} else {\
+		ret = kv_##op(handle, kv);\
+	}\
 }
 
-int kv_store_op(uint64_t handle, kv_pair* kv) {
-	return kv_store(handle, kv);
+#define KV_PERF_ASYNC_IO(op, ret, handle, qid, kv) \
+{\
+	if (g_low_cmd_mode) {\
+		ret = kv_nvme_##op##_async(handle, qid, kv);\
+	} else {\
+		ret = kv_##op##_async(handle, kv);\
+	}\
 }
 
-int kv_store_async_op(uint64_t handle, kv_pair* kv) {
-	return kv_store_async(handle, kv);
-}
-
-int kv_retrieve_op(uint64_t handle, kv_pair* kv) {
-	return kv_retrieve(handle, kv);
-}
-
-int kv_retrieve_async_op(uint64_t handle, kv_pair* kv) {
-	return kv_retrieve_async(handle, kv);
-}
-
-int kv_delete_op(uint64_t handle, kv_pair* kv){
-	return kv_delete(handle, kv);
-}
-
-int kv_delete_async_op(uint64_t handle, kv_pair* kv){
-	return kv_delete_async(handle, kv);
-}
-
-int (*kv_op_arr[4])(uint64_t handle, kv_pair *kv) = {kv_nop, kv_store_op, kv_retrieve_op, kv_delete_op};
-int (*kv_async_op_arr[4])(uint64_t handle, kv_pair *kv) = {kv_nop, kv_store_async_op, kv_retrieve_async_op, kv_delete_async_op};
-
-
-int (*kv_perf_store)(uint64_t handle, kv_pair* kv);
-int (*kv_perf_store_async)(uint64_t handle, kv_pair* kv);
-int (*kv_perf_retrieve)(uint64_t handle, kv_pair* kv);
-int (*kv_perf_retrieve_async)(uint64_t handle, kv_pair* kv);
-int (*kv_perf_delete)(uint64_t handle, kv_pair* kv);
-int (*kv_perf_delete_async)(uint64_t handle, kv_pair* kv);
+int (*kv_nvme_store)(uint64_t handle, int, const kv_pair* kv);
+int (*kv_nvme_store_async)(uint64_t handle, int, const kv_pair* kv);
+int (*kv_nvme_retrieve)(uint64_t handle, int, kv_pair* kv);
+int (*kv_nvme_retrieve_async)(uint64_t handle, int, kv_pair* kv);
 
 void set_io_function(bool low_cmd_mode){
 	if (low_cmd_mode){
-		kv_perf_store = (int (*)(uint64_t, kv_pair*))kv_nvme_write;
-		kv_perf_store_async = (int (*)(uint64_t, kv_pair*))kv_nvme_write_async;
-		kv_perf_retrieve = kv_nvme_read;
-		kv_perf_retrieve_async = kv_nvme_read_async;
-		kv_perf_delete = (int (*)(uint64_t, kv_pair*))kv_nvme_delete;
-		kv_perf_delete_async = (int (*)(uint64_t, kv_pair*))kv_nvme_delete_async;
-
-		kv_op_arr[1] = kv_perf_store;
-		kv_op_arr[2] = kv_perf_retrieve;
-		kv_op_arr[3] = kv_perf_delete;
-		kv_async_op_arr[1] = kv_perf_store_async;
-		kv_async_op_arr[2] = kv_perf_retrieve_async;
-		kv_async_op_arr[3] = kv_perf_delete_async;
-	} else {
-		kv_perf_store = kv_store;
-		kv_perf_store_async = kv_store_async;
-		kv_perf_retrieve = kv_retrieve;
-		kv_perf_retrieve_async = kv_retrieve_async;
-		kv_perf_delete = kv_delete;
-		kv_perf_delete_async = kv_delete_async;
+		kv_nvme_store = kv_nvme_write;
+		kv_nvme_store_async = kv_nvme_write_async;
+		kv_nvme_retrieve = kv_nvme_read;
+		kv_nvme_retrieve_async = kv_nvme_read_async;
 	}
 }
 
@@ -342,11 +309,12 @@ void delete_test_data(unsigned int device, unsigned int thread_index)
 		struct kvpair *kv = TAILQ_FIRST(&g_private_data[device][thread_index].kv_data);
 		TAILQ_REMOVE(&g_private_data[device][thread_index].kv_data, kv, tailq);
 
-		free(kv->pair.key.key);
 		if (g_low_cmd_mode) {
 			kv_free(kv->pair.value.value);
+			kv_free(kv->pair.key.key);
 		} else {
 			free(kv->pair.value.value);
+			free(kv->pair.key.key);
 		}
 		free(kv);
 	}
@@ -421,8 +389,13 @@ int create_test_data(unsigned int device, unsigned int thread_index, unsigned in
 				ret = -ENOMEM;
 				goto err;
 			}
+			kv->pair.keyspace_id = KV_KEYSPACE_IODATA;
 			kv->pair.key.length = g_opt.key_size;
-			kv->pair.key.key = malloc(kv->pair.key.length);
+			if (g_low_cmd_mode ) {
+				kv->pair.key.key = kv_zalloc(kv->pair.key.length);
+			} else {
+				kv->pair.key.key = malloc(kv->pair.key.length);
+			}
 			if (kv->pair.key.key == NULL) {
 				printf("Error: malloc() failed for a key %d\n", count);
 				delete_test_data(device, thread_index);
@@ -762,6 +735,7 @@ void show_kv_perf_menu(){
                "\t--def_value | -k <key_value>, 8 bytes value string. This is filled upto the value size(e.g.DEADBEEF), default: NULL\n"
                "\t--read_file | -f <File Name>, Name of the file to read the Key Value(e.g.\"/home/guest/key_value.txt\"), default: NULL\n"
                "\t--key_range | -y <key_start-key_end>, -y <s-e> <s-e> <s-e> for blent test, workload type should be 3(-p 3), default: NULL\n"
+               "\t--use_sdk_cmd | -L, Use SDK level IO cmds. If this options is not set, use low level IO cmds\n"
 	       "\t--help | -h, Showing command menu\n");
 }
 
@@ -833,7 +807,7 @@ int parse_opt(int argc, char **argv)
 		{"format",    no_argument,       0,  'z' },
 		{"use_cache", no_argument,	 0,  'u' },
 		{"send_get_log", no_argument,	 0,  'i' },
-		{"low_cmd_mode", no_argument,	 0,  'L' },
+		{"use_sdk_cmd", no_argument,	 0,  'L' },
 		{"help",      no_argument,       0,  'h' },
 		{0,           0,                 0,  0   }
 	};
@@ -1368,6 +1342,7 @@ void io_thread(void *data) {
 	int ret, test_count = 0, queue_io_type = 0;
 	unsigned int device;
 	struct timeval time;
+	int qid = DEFAULT_IO_QUEUE_ID;
 
 	tpd = (thread_priv_data_t *)data;
 	thread_index = tpd->thread_index;
@@ -1413,7 +1388,7 @@ void io_thread(void *data) {
 					kv->pair.param.private_data = (void *)kv;
 					while(ret) {
 						gettimeofday(&kv->start, NULL);
-						ret = kv_perf_store_async(handle, &kv->pair);
+						KV_PERF_ASYNC_IO(store, ret, handle, qid, &kv->pair);
 						if(ret) {
 							//usleep(1);
 						} else {
@@ -1426,7 +1401,7 @@ void io_thread(void *data) {
 					}
 				} else {
 					gettimeofday(&kv->start, NULL);
-					ret = kv_perf_store(handle, &kv->pair);
+					KV_PERF_SYNC_IO(store, ret, handle, qid, &kv->pair);
 					gettimeofday(&kv->end, NULL);
 					if(ret) {
 						printf("kv_store() failed for the key %s, test: %d\n", (char *)kv->pair.key.key, test_count);
@@ -1488,7 +1463,7 @@ void io_thread(void *data) {
 					kv->pair.param.private_data = (void *)kv;
 					while(ret) {
 						gettimeofday(&kv->start, NULL);
-						ret = kv_perf_retrieve_async(handle, &kv->pair);
+						KV_PERF_ASYNC_IO(retrieve, ret, handle, qid, &kv->pair);
 
 						if(ret) {
 							//usleep(1);
@@ -1502,7 +1477,7 @@ void io_thread(void *data) {
 					}
 				} else {
 					gettimeofday(&kv->start, NULL);
-					ret = kv_perf_retrieve(handle, &kv->pair);
+					KV_PERF_SYNC_IO(retrieve, ret, handle, qid, &kv->pair);
 					gettimeofday(&kv->end, NULL);
 					if(ret) {
 						printf("kv_retrieve() failed for the key %s, test: %d\n", (char *)kv->pair.key.key, test_count);
@@ -1541,7 +1516,7 @@ void io_thread(void *data) {
 						ret = -EINVAL;
 						kv->pair.param.private_data = (void *)kv;
 						while(ret) {
-							ret = kv_perf_retrieve(handle, &kv->pair);
+							KV_PERF_ASYNC_IO(retrieve, ret, handle, qid, &kv->pair);
 
 							if(ret) {
 								//usleep(1);
@@ -1551,7 +1526,7 @@ void io_thread(void *data) {
 							}
 						}
 					} else {
-						ret = kv_perf_retrieve(handle, &kv->pair);
+						KV_PERF_SYNC_IO(retrieve, ret, handle, qid, &kv->pair);
 						if(ret) {
 							printf("kv_retreive() failed for the key %s, test: %d\n", (char *)kv->pair.key.key, test_count);
 							break;
@@ -1620,7 +1595,7 @@ void io_thread(void *data) {
 					kv->pair.param.private_data = (void *)kv;
 					while(ret) {
 						gettimeofday(&kv->start, NULL);
-						ret = kv_perf_delete_async(handle, &kv->pair);
+						KV_PERF_ASYNC_IO(delete, ret, handle, qid, &kv->pair);
 
 						if(ret) {
 							//usleep(1);
@@ -1634,7 +1609,7 @@ void io_thread(void *data) {
 					}
 				} else {
 					gettimeofday(&kv->start, NULL);
-					ret = kv_perf_delete(handle, &kv->pair);
+					KV_PERF_SYNC_IO(delete, ret, handle, qid, &kv->pair);
 					gettimeofday(&kv->end, NULL);
 					if(ret) {
 						printf("kv_nvme_delete() failed for the key %s, test: %d\n", (char *)kv->pair.key.key, test_count);
@@ -1685,22 +1660,25 @@ void io_thread(void *data) {
 				if (queue_io_type == ASYNC_IO_QUEUE) {
 					ret = -EINVAL;
 					kv->pair.param.private_data = (void *)kv;
-					switch(kv->op) {
-						case WRITE:
-							kv->pair.param.io_option.store_option = KV_STORE_DEFAULT;
-							break;
-						case READ:
-							kv->pair.param.io_option.retrieve_option = KV_RETRIEVE_DEFAULT;
-							break;
-						case DEL:
-							kv->pair.param.io_option.delete_option = KV_DELETE_DEFAULT;
-							break;
-						default:
-							break;
-					}
 					while(ret) {
 						gettimeofday(&kv->start, NULL);
-						ret = kv_async_op_arr[kv->op](handle, &kv->pair);
+
+						switch(kv->op) {
+							case WRITE:
+								kv->pair.param.io_option.store_option = KV_STORE_DEFAULT;
+								KV_PERF_ASYNC_IO(store, ret, handle, qid, &kv->pair);
+								break;
+							case READ:
+								kv->pair.param.io_option.retrieve_option = KV_RETRIEVE_DEFAULT;
+								KV_PERF_ASYNC_IO(retrieve, ret, handle, qid, &kv->pair);
+								break;
+							case DEL:
+								kv->pair.param.io_option.delete_option = KV_DELETE_DEFAULT;
+								KV_PERF_ASYNC_IO(delete, ret, handle, qid, &kv->pair);
+								break;
+							default:
+								break;
+						}
 
 						if(ret) {
 							//usleep(1);
@@ -1717,17 +1695,19 @@ void io_thread(void *data) {
 					switch(kv->op) {
 						case WRITE:
 							kv->pair.param.io_option.store_option = KV_STORE_DEFAULT;
+							KV_PERF_SYNC_IO(store, ret, handle, qid, &kv->pair);
 							break;
 						case READ:
 							kv->pair.param.io_option.retrieve_option = KV_RETRIEVE_DEFAULT;
+							KV_PERF_SYNC_IO(retrieve, ret, handle, qid, &kv->pair);
 							break;
 						case DEL:
 							kv->pair.param.io_option.delete_option = KV_DELETE_DEFAULT;
+							KV_PERF_SYNC_IO(delete, ret, handle, qid, &kv->pair);
 							break;
 						default:
 							break;
 					}
-					ret = kv_op_arr[kv->op](handle, &kv->pair);
 					gettimeofday(&kv->end, NULL);
 					if(ret) {
 						printf("kv_op() failed for the key %s, test: %d\n", (char *)kv->pair.key.key, test_count);
@@ -1852,7 +1832,7 @@ int main(int argc, char **argv) {
 
 	set_io_function(g_low_cmd_mode); //added to support low cmd API
 	if (g_low_cmd_mode) {
-		size_t io_buffer = ((g_opt.max_value_size * g_opt.num_keys[0] * 1.5)) * num_io_thread;
+		uint64_t io_buffer = (uint64_t)(((g_opt.max_value_size * g_opt.num_keys[0] * 1.5)) * num_io_thread);
 		sdk_opt.app_hugemem_size = io_buffer;
 	}
 
@@ -1868,7 +1848,7 @@ int main(int argc, char **argv) {
 
 	if(g_opt.format) {
 		for(i=0;i<(unsigned int)sdk_opt.nr_ssd;i++){
-			int ret = kv_format_device(sdk_opt.dev_handle[i]);
+			int ret = kv_format_device(sdk_opt.dev_handle[i], KV_FORMAT_USERDATA);
 			if(ret) {
 				printf("Error in formatting the device, ret : %d\n", ret);
 				goto finalize_sdk;

@@ -68,21 +68,25 @@ typedef struct {
 	int tid;
 }time_stamp;
 
-#define KEY_LENGTH (16)
 #define DISPLAY_CNT (10000)
 
 kv_pair** kv;
+int key_length;
 int value_size;
 int insert_count;
 kv_sdk sdk_opt;
 
+int g_exist_answer;
+
 int* g_write_complete_count;
 int* g_read_complete_count;
 int* g_delete_complete_count;
+int* g_exist_complete_count;
 
 pthread_mutex_t* g_write_mutex; /*to protect complete cnt*/
 pthread_mutex_t* g_read_mutex;
 pthread_mutex_t* g_delete_mutex;
+pthread_mutex_t* g_exist_mutex;
 
 unsigned long long seed = 0x0102030405060708LL;
 int is_miscompare(unsigned long long *v1, unsigned long long *v2) {
@@ -119,6 +123,26 @@ void async_read_cb(kv_pair* kv, unsigned int result, unsigned int status){
 	pthread_mutex_lock(&g_read_mutex[tid]);
         g_read_complete_count[tid]++;
 	pthread_mutex_unlock(&g_read_mutex[tid]);
+}
+
+/*callback for Exist*/
+void async_exist_cb(kv_pair* kv, unsigned int result, unsigned int status){
+	//fail_unless(status == g_exist_answer);
+	if(status != g_exist_answer) {
+		fprintf(stderr, "%s fail: returned status(0x%x) != expected value(0x%x)\n", __FUNCTION__, status, g_exist_answer);
+		exit(1);
+	}
+	if (!kv) {
+		fprintf(stderr, "%s fails: kv_pair is NULL\n", __FUNCTION__);
+		exit(1);
+	}
+	time_stamp *p_time_stamp = (time_stamp *) kv->param.private_data;
+	int tid = p_time_stamp->tid;
+	gettimeofday(&p_time_stamp->end, NULL);
+
+	pthread_mutex_lock(&g_exist_mutex[tid]);
+	g_exist_complete_count[tid]++;
+	pthread_mutex_unlock(&g_exist_mutex[tid]);
 }
 
 /*callback for Delete*/
@@ -224,6 +248,44 @@ void* sdk_read(void* data){
         gettimeofday(param->t_end, NULL);
 }
 
+void* sdk_exist(void* data) {
+	thread_param *param = (thread_param*) data;
+	int i, tid = param->tid;
+	int core_id = param->core_id;
+	uint64_t handle = param->device_handle;
+
+	//set affinity as core_id
+	cpu_set_t cpuset;
+	CPU_ZERO(&cpuset);
+	CPU_SET(core_id, &cpuset);
+	sched_setaffinity(0, sizeof(cpu_set_t), &cpuset);
+
+	fprintf(stderr, "[cid=%d][tid=%d][handle=%lu]kv_exist_async: ", core_id, tid, handle);
+	//prepare
+	for (i = 0 + (tid * insert_count); i < insert_count + (tid * insert_count); i++) {
+		sprintf(kv[i]->key.key, "%04d%12d", tid, i);
+		kv[i]->param.async_cb = async_exist_cb;
+		kv[i]->param.io_option.exist_option = KV_EXIST_DEFAULT;
+		((time_stamp *) kv[i]->param.private_data)->tid = tid;
+	}
+
+	//IO
+	gettimeofday(param->t_start, NULL);
+	for (i = 0 + (tid * insert_count); i < insert_count + (tid * insert_count); i++) {
+		if (!((i - (tid * insert_count)) % DISPLAY_CNT)) {
+			fprintf(stderr, "%d ", (i - (tid * insert_count)));
+		}
+		gettimeofday(&((time_stamp *) kv[i]->param.private_data)->start, NULL);
+		fail_unless(0 == kv_exist_async(handle, kv[i]));
+	}
+	fprintf(stderr, "Done\n");
+
+	while (g_exist_complete_count[tid] != insert_count) {
+		usleep(1);
+	}
+	gettimeofday(param->t_end, NULL);
+}
+
 void* sdk_delete(void* data){
         thread_param *param = (thread_param*)data;
         int i, tid = param->tid;
@@ -239,7 +301,11 @@ void* sdk_delete(void* data){
 	fprintf(stderr,"[cid=%d][tid=%d][handle=%lu]kv_delete_async: ", core_id, tid, handle);
 	//prepare
         for(i=0+(tid*insert_count);i<insert_count+(tid*insert_count);i++){
-		sprintf(kv[i]->key.key, "%04d%12d",tid,i);
+		if(sdk_opt.ssd_type == LBA_TYPE_SSD) {
+			*((uint64_t*)(kv[i]->key.key)) = i * (kv[i]->value.length / SECTOR_SIZE);
+		} else {
+			sprintf(kv[i]->key.key, "%04d%12d",tid,i);
+		}
 		kv[i]->param.async_cb = async_delete_cb;
 		kv[i]->param.io_option.delete_option = KV_DELETE_DEFAULT;
 		((time_stamp *)kv[i]->param.private_data)->tid = tid;
@@ -266,6 +332,7 @@ void* sdk_delete(void* data){
 int test(void){
 	printf("%s start\n",__FUNCTION__);
 
+	key_length = 16;
 	value_size = 4096;
 	insert_count = 10 * 10000;
 	int nthreads = 0;
@@ -331,11 +398,13 @@ int test(void){
 	g_write_complete_count = (int *)calloc(nthreads, sizeof(int));
 	g_read_complete_count = (int *)calloc(nthreads, sizeof(int));
 	g_delete_complete_count = (int *)calloc(nthreads, sizeof(int));
-	fail_unless(g_write_complete_count && g_read_complete_count && g_delete_complete_count);
+	g_exist_complete_count = (int *)calloc(nthreads, sizeof(int));
+	fail_unless(g_write_complete_count && g_read_complete_count && g_delete_complete_count && g_exist_complete_count);
 	g_write_mutex = (pthread_mutex_t *)calloc(nthreads, sizeof(pthread_mutex_t));
 	g_read_mutex = (pthread_mutex_t *)calloc(nthreads, sizeof(pthread_mutex_t));
 	g_delete_mutex = (pthread_mutex_t *)calloc(nthreads, sizeof(pthread_mutex_t));
-	fail_unless(g_write_mutex && g_read_mutex && g_delete_mutex);
+	g_exist_mutex = (pthread_mutex_t *)calloc(nthreads, sizeof(pthread_mutex_t));
+	fail_unless(g_write_mutex && g_read_mutex && g_delete_mutex && g_exist_mutex);
 
 	for(i=0;i<nthreads;i++){
 		g_write_mutex[i] = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
@@ -359,10 +428,11 @@ int test(void){
 	        kv[i] = (kv_pair*)malloc(sizeof(kv_pair));
 		fail_unless(kv[i] != NULL);
 
-		kv[i]->key.key = malloc(KEY_LENGTH);//16
+		kv[i]->keyspace_id = KV_KEYSPACE_IODATA;
+		kv[i]->key.key = malloc(key_length);//16
 		fail_unless(kv[i]->key.key != NULL);
-		kv[i]->key.length = KEY_LENGTH;
-		memset(kv[i]->key.key,0,KEY_LENGTH);
+		kv[i]->key.length = key_length;
+		memset(kv[i]->key.key,0,key_length);
 
 	        kv[i]->value.value = malloc(value_size);
 		fail_unless(kv[i]->value.value != NULL);
@@ -401,8 +471,13 @@ int test(void){
 	        }
 	        used_size = kv_get_used_size(handle);
         	if (used_size != KV_ERR_INVALID_VALUE){
-                	fprintf(stderr, "  -Used Size of the NVMe Device: %.2f %s\n", (float)used_size / 100, "%");
-	        }
+	                if(sdk_opt.ssd_type == KV_TYPE_SSD){
+		                printf("  -Used Size of the NVMe Device: %.2f %s \n", (float)used_size / 100, "%");
+			}
+			else{
+				printf("  -Used Size of the NVMe Device: %lld MB\n", (unsigned long long)used_size / MB);
+			}
+		}
 	        waf = kv_get_waf(handle);
         	if (waf != KV_ERR_INVALID_VALUE) {
                 	fprintf(stderr, "  -WAF Before doing I/O: %f\n", waf / 10);
@@ -427,7 +502,7 @@ int test(void){
 
 	//Clear all key_buffer 
 	for(i=0;i<insert_count*nthreads;i++){
-		memset(kv[i]->key.key,0,KEY_LENGTH);
+		memset(kv[i]->key.key,0,key_length);
 		memset(kv[i]->value.value,0,value_size);
 	}
 
@@ -463,14 +538,16 @@ int test(void){
 
         //Clear all key_buffer 
         for(i=0;i<insert_count*nthreads;i++){
-                memset(kv[i]->key.key,0,KEY_LENGTH);
+                memset(kv[i]->key.key,0,key_length);
         }
 
 	//Run Delete Thread
 	if(sdk_opt.ssd_type == KV_TYPE_SSD) {
+		//Run Exist Thread after delete
+		g_exist_answer = KV_SUCCESS;
 		for(i=0;i<nthreads;i++){
 			p[i].tid = i;
-			fail_unless(0 <= pthread_create(&t[i], NULL, sdk_delete, &p[i]));
+			fail_unless(0 <= pthread_create(&t[i], NULL, sdk_exist, &p[i]));
 		}
 
 		for(i=0;i<nthreads;i++){
@@ -481,8 +558,48 @@ int test(void){
 			p_time_stamp = (time_stamp *)kv[i]->param.private_data;
 			add_latency_stat(&stat, &p_time_stamp->start, &p_time_stamp->end);
 		}
-		show_elapsed_time_cumulative(thread_start, thread_end, nthreads, "kv_sdk_multi_delete", insert_count, value_size, &stat);
+		show_elapsed_time_cumulative(thread_start, thread_end, nthreads, "kv_sdk_multi_exist", insert_count, value_size, &stat);
 	}
+
+	//Run Delete Thread
+	for(i=0;i<nthreads;i++){
+		p[i].tid = i;
+		fail_unless(0 <= pthread_create(&t[i], NULL, sdk_delete, &p[i]));
+	}
+
+	for(i=0;i<nthreads;i++){
+		pthread_join(t[i],(void**)&status[i]);
+	}
+	reset_latency_stat(&stat);
+	for(i=0;i<insert_count*nthreads;i++){
+		p_time_stamp = (time_stamp *)kv[i]->param.private_data;
+		add_latency_stat(&stat, &p_time_stamp->start, &p_time_stamp->end);
+	}
+	show_elapsed_time_cumulative(thread_start, thread_end, nthreads, "kv_sdk_multi_delete", insert_count, value_size, &stat);
+
+	//Run Exist Thread after delete
+	if(sdk_opt.ssd_type == KV_TYPE_SSD) {
+		g_exist_answer = KV_ERR_NOT_EXIST_KEY;
+		for(i=0;i<nthreads;i++){
+			g_exist_complete_count[i] = 0;
+		}
+
+		for(i=0;i<nthreads;i++){
+			p[i].tid = i;
+			fail_unless(0 <= pthread_create(&t[i], NULL, sdk_exist, &p[i]));
+		}
+
+		for(i=0;i<nthreads;i++){
+			pthread_join(t[i],(void**)&status[i]);
+		}
+		reset_latency_stat(&stat);
+		for(i=0;i<insert_count*nthreads;i++){
+			p_time_stamp = (time_stamp *)kv[i]->param.private_data;
+			add_latency_stat(&stat, &p_time_stamp->start, &p_time_stamp->end);
+		}
+		show_elapsed_time_cumulative(thread_start, thread_end, nthreads, "kv_sdk_multi_exist_after_delete", insert_count, value_size, &stat);
+	}
+
 	//Print device information after test
 	for(i=0;i<sdk_opt.nr_ssd;i++){
 		uint64_t handle, total_size, used_size;
@@ -497,7 +614,12 @@ int test(void){
 	        }
 	        used_size = kv_get_used_size(handle);
         	if (used_size != KV_ERR_INVALID_VALUE){
-                	fprintf(stderr, "  -Used Size of the NVMe Device: %.2f %s\n", (float)used_size / 100, "%");
+	                if(sdk_opt.ssd_type == KV_TYPE_SSD){
+				printf("  -Used Size of the NVMe Device: %.2f %s \n", (float)used_size / 100, "%");
+                        }
+                        else{
+                                printf("  -Used Size of the NVMe Device: %lld MB\n", (unsigned long long)used_size / MB);
+                        }
 	        }
 	        waf = kv_get_waf(handle);
         	if (waf != KV_ERR_INVALID_VALUE) {
@@ -534,9 +656,11 @@ int test(void){
         free(g_write_complete_count);
         free(g_read_complete_count);
         free(g_delete_complete_count);
+        free(g_exist_complete_count);
         free(g_write_mutex);
         free(g_read_mutex);
         free(g_delete_mutex);
+        free(g_exist_mutex);
 
 	fprintf(stderr, "%s done\n",__FUNCTION__);
 

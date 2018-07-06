@@ -1,0 +1,79 @@
+nvme-set-feature(1)
+===================
+
+NAME
+----
+nvme-set-feature - Sets an NVMe feature, returns applicable results
+
+SYNOPSIS
+--------
+[verse]
+'nvme set-feature' <device> [--namespace-id=<nsid> | -n <nsid>]
+			  [--feature-id=<fid> | -f <fid>] [--value=<value> | -v <value>]
+			  [--data-len=<data-len> | -l <data-len>]
+			  [--data=<data-file> | -d <data-file>]
+			  [--save| -s]
+
+DESCRIPTION
+-----------
+Submits an NVMe Set Feature admin command and returns the applicable
+results. This may be the feature's value, or may also include a feature
+structure if the feature requires it (ex: LBA Range Type).
+
+The <device> parameter is mandatory and may be either the NVMe character
+device (ex: /dev/nvme0), or a namespace block device (ex: /dev/nvme0n1).
+
+On success, the value sent to the device is displayed
+
+OPTIONS
+-------
+-n <nsid>::
+--namespace-id=<nsid>::
+	Sets the feature for the given nsid. This is optional and
+	most features do not use this value.
+
+-f <fid>::
+--feature-id=<fid>::
+	The feature id to send with the command. Value provided should
+	be in hex.
+
+-l <data-len>::
+--data-len=<data-len>::
+	The data length for the buffer submitted for this feature. Most
+	known features do not use this value. The exceptions are LBA
+	Range Type and host identifier.
+
+-d <data-file>::
+--data=<data-file>::
+	The data file for the buffer submitted for this feature. Most
+	known features do not use this value. The exceptions is LBA
+	Range Type and host identifier. This defaults to STDIN so files
+	and echo can be piped.
+
+-v <value>::
+--value=<value>::
+	The value for command dword 11, the value you want to set the
+	feature to.
+
+-s::
+--save::
+	Save the attribute so that it persists through all power states and resets.	
+
+EXAMPLES
+--------
+* Sets the Power State (PS) to 1  in feature id 2:
++
+------------
+# nvme set-feature /dev/nvme0 -f 2 /dev/nvme0n1 -v 0x1
+------------
++
+
+* Sets the host id to the ascii string.
++
+------------
+# echo "abcdefgh" | nvme set-feature /dev/nvme0 -f 0x81 -l 8
+------------
+
+NVME
+----
+Part of the nvme-user suite

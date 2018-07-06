@@ -1,0 +1,77 @@
+'\" t
+.\"     Title: nvme-create-ns
+.\"    Author: [FIXME: author] [see http://docbook.sf.net/el/author]
+.\" Generator: DocBook XSL Stylesheets v1.78.1 <http://docbook.sf.net/>
+.\"      Date: 06/28/2017
+.\"    Manual: NVMe Manual
+.\"    Source: NVMe
+.\"  Language: English
+.\"
+.TH "NVME\-CREATE\-NS" "1" "06/28/2017" "NVMe" "NVMe Manual"
+.\" -----------------------------------------------------------------
+.\" * Define some portability stuff
+.\" -----------------------------------------------------------------
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.\" http://bugs.debian.org/507673
+.\" http://lists.gnu.org/archive/html/groff/2009-02/msg00013.html
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.ie \n(.g .ds Aq \(aq
+.el       .ds Aq '
+.\" -----------------------------------------------------------------
+.\" * set default formatting
+.\" -----------------------------------------------------------------
+.\" disable hyphenation
+.nh
+.\" disable justification (adjust text to left margin only)
+.ad l
+.\" -----------------------------------------------------------------
+.\" * MAIN CONTENT STARTS HERE *
+.\" -----------------------------------------------------------------
+.SH "NAME"
+nvme-create-ns \- Send NVMe Namespace management command to create namespace, returns results\&.
+.SH "SYNOPSIS"
+.sp
+.nf
+\fInvme create\-ns\fR <device> [\-\-nsze=<nsze> | \-s <nsze>]
+                        [\-\-ncap=<ncap> | \-c <ncap>]
+                        [\-\-flbas=<flbas> | \-f <flbas>]
+                        [\-\-dps=<dps> | \-d <dps>]
+                        [\-\-nmic=<nmic> | \-m <nmic>]
+.fi
+.SH "DESCRIPTION"
+.sp
+For the NVMe device given, sends a namespace management command to create the namespace with the requested settings\&. On success, the namespace identifier assigned by the controller is returned\&.
+.sp
+The <device> parameter is mandatory and may be either the NVMe character device (ex: /dev/nvme0), or a namespace block device (ex: /dev/nvme0n1)\&.
+.SH "OPTIONS"
+.PP
+\-s, \-\-nsze
+.RS 4
+The namespace size\&.
+.RE
+.PP
+\-c, \-\-ncap
+.RS 4
+The namespace capacity\&.
+.RE
+.PP
+\-f, \-\-flbas
+.RS 4
+The namespace formatted logical block size setting\&.
+.RE
+.PP
+\-d, \-\-dps
+.RS 4
+The data protection settings\&.
+.RE
+.PP
+\-m, \-\-nmic
+.RS 4
+Namespace multipath and sharing capabilities\&.
+.RE
+.SH "EXAMPLES"
+.sp
+No examples provided yet\&.
+.SH "NVME"
+.sp
+Part of the nvme\-user suite

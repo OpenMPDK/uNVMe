@@ -1,0 +1,15 @@
+{
+  "ssd_type" : "lba",
+  "device_description" : [
+    {
+      "dev_id" : "0000:01:00.0",
+      "core_mask" : 1,
+      "cq_thread_mask" : 4
+    },
+    {
+      "dev_id" : "0000:02:00.0",
+      "core_mask" : 1,
+      "cq_thread_mask" : 8
+    }
+  ]
+}

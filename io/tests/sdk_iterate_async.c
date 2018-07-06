@@ -160,10 +160,11 @@ int sdk_iterate_async(void){
                 kv[i] = (kv_pair*)malloc(sizeof(kv_pair));
 		fail_unless(kv[i] != NULL);
 
-                kv[i]->key.key = malloc(key_length);
+		kv[i]->keyspace_id = KV_KEYSPACE_IODATA;
+                kv[i]->key.key = malloc(key_length + 1);
 		fail_unless(kv[i]->key.key != NULL);
 		kv[i]->key.length = key_length;
-                memset(kv[i]->key.key,0,key_length);
+                memset(kv[i]->key.key,0,key_length + 1);
 
                 kv[i]->value.value = malloc(value_size*2); //for retrieve appended kv pair
 		fail_unless(kv[i]->value.value != NULL);
@@ -181,10 +182,10 @@ int sdk_iterate_async(void){
         for(i=0;i<iterate_read_count;i++){
 		it[i] = (kv_iterate*)malloc(sizeof(kv_iterate));
 		it[i]->iterator = KV_INVALID_ITERATE_HANDLE;
-		it[i]->kv.key.key = malloc(key_length);
+		it[i]->kv.key.key = malloc(key_length + 1);
 		fail_unless(it[i]->kv.key.key);
 		it[i]->kv.key.length = key_length;
-		memset(it[i]->kv.key.key, 0, it[i]->kv.key.length);
+		memset(it[i]->kv.key.key, 0, it[i]->kv.key.length + 1);
 
 		it[i]->kv.value.value = malloc(iterate_buffer_size);
 		fail_unless(it[i]->kv.value.value);
@@ -277,8 +278,8 @@ int sdk_iterate_async(void){
         if(ret == KV_SUCCESS){
                 fprintf(stderr, "iterate_handle count=%d\n",nr_iterate_handle);
                 for(i=0;i<nr_iterate_handle;i++){
-                        fprintf(stderr, "Retrieve iterate_handle_info[%d] : info.handle_id=%d info.status=%d info.type=%d info.prefix=%08x info.bitmask=%08x\n",
-                                i+1, info[i].handle_id, info[i].status, info[i].type, info[i].prefix, info[i].bitmask);
+                        fprintf(stderr, "Retrieve iterate_handle_info[%d] : info.handle_id=%d info.status=%d info.type=%d info.keyspace_id=%d info.prefix=%08x info.bitmask=%08x info.is_eof=%d\n",
+                                i+1, info[i].handle_id, info[i].status, info[i].type, info[i].keyspace_id, info[i].prefix, info[i].bitmask, info[i].is_eof);
                         if(info[i].status == ITERATE_HANDLE_OPENED){
                                 printf("close iterate_handle : %d\n", info[i].handle_id);
                                 kv_iterate_close(handle, info[i].handle_id);
@@ -291,19 +292,20 @@ int sdk_iterate_async(void){
 	uint32_t prefix = 0;
         memcpy(&prefix,kv[0]->key.key,4);
         uint32_t iterator = KV_INVALID_ITERATE_HANDLE;
-        fprintf(stderr,"[%s] bitmask=%x bit_pattern=%x\n",__FUNCTION__,bitmask, prefix);
+        uint8_t keyspace_id = KV_KEYSPACE_IODATA;
+        fprintf(stderr,"[%s] keyspace_id=%d bitmask=%x bit_pattern=%x\n",__FUNCTION__,keyspace_id, bitmask, prefix);
 
         gettimeofday(&start, NULL);
-        iterator = kv_iterate_open(handle, bitmask, prefix, KV_KEY_ITERATE);
-        //iterator = kv_iterate_open(handle, bitmask, prefix, KV_KEY_ITERATE_WITH_RETRIEVE);
+        iterator = kv_iterate_open(handle, keyspace_id, bitmask, prefix, KV_KEY_ITERATE);
+        //iterator = kv_iterate_open(handle, keyspace_id, bitmask, prefix, KV_KEY_ITERATE_WITH_RETRIEVE);
         gettimeofday(&end, NULL);
 
 	memset((char*)&info,0,sizeof(info));
         ret = kv_iterate_info(handle, info, nr_iterate_handle);
 	if(ret == KV_SUCCESS){
 		for(i=0;i<nr_iterate_handle;i++){
-			fprintf(stderr, "Current iterate_handle_info[%d] : info.handle_id=%d info.status=%d info.type=%d info.prefix=%08x info.bitmask=%08x\n",
-				i+1, info[i].handle_id, info[i].status, info[i].type, info[i].prefix, info[i].bitmask);
+                        fprintf(stderr, "Retrieve iterate_handle_info[%d] : info.handle_id=%d info.status=%d info.type=%d info.keyspace_id=%d info.prefix=%08x info.bitmask=%08x info.is_eof=%d\n",
+                                i+1, info[i].handle_id, info[i].status, info[i].type, info[i].keyspace_id, info[i].prefix, info[i].bitmask, info[i].is_eof);
 		}
 	}
 

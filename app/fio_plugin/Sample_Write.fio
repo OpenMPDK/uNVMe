@@ -1,5 +1,6 @@
 [global]
 ioengine=./unvme2_fio_plugin
+json_path=./unvme2_config.json
 thread=1
 group_reporting=1
 direct=1
@@ -10,7 +11,7 @@ runtime=5
 rw=write
 iodepth=128
 bs=4k
-filename=0000.02.00.0
 
 [test]
+filename=0000.02.00.0
 numjobs=1

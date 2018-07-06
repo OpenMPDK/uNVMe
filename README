@@ -12,32 +12,45 @@ This release also includes the sample applications and tools for the uNVMe drive
 
 
 ================================================
-Prerequisites
+Prerequisites (Please run commands below as root)
 
-#sudo apt-get install -y gcc g++ make libcunit1-dev libaio-dev libssl-dev check
-#sudo apt-get install xfsprogs
-#sudo apt-get install linux-tools-common linux-cloud-tools-4.2.0-16 linux-tools-4.2.0-16 linux-tools-4.2.0-16-generic linux-cloud-tools-4.2.0-16-generic
 
-In CentOS, some packages like linux-tools-common are not available. Use below commands (Example for CentOS 7 on x86_64):
-# sudo rpm -Uvh http://dl.fedoraproject.org/pub/epel/7/x86_64/Packages/e/epel-release-7-11.noarch.rpm
-# sudo yum update
-# sudo yum install google-perftools google-perftools-devel
-# sudo yum install CUnit-devel openssl-devel gflags-devel libaio-devel check-devel scons
+1. DPDK/SPDK
+	// Install OS dependent packages in an autonomous manner
+	#${MPDK_HOME}/script/pkgdep.sh
 
-optional libraries
-srandom - fast random generator : https://github.com/josenk/srandom
-libcheck - unit test framework for C : https://github.com/libcheck/check
+	// Or, manual installation
+	//Ubuntu/Debian
+	#apt-get install -y gcc g++ make libcunit1-dev libaio-dev libssl-dev libgflags-dev check
+	#apt-get install xfsprogs
+	#apt-get install linux-tools-common linux-cloud-tools-`uname -r` linux-tools-`uname -r` linux-tools-`uname -r`-generic linux-cloud-tools-`uname -r`-generic
+	-------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+	//Centos
+	# rpm -Uvh http://dl.fedoraproject.org/pub/epel/7/x86_64/Packages/e/epel-release-7-11.noarch.rpm
+	# yum update
+	# yum install google-perftools google-perftools-devel
+	# yum install CUnit-devel openssl-devel gflags-devel libaio-devel check-devel scons
+
+2. Other Apps
+	fuse3: https://github.com/libfuse/libfuse/
+	libcheck - unit test framework for C : https://github.com/libcheck/check
+
+3. Optional libraries
+	srandom - fast random generator : https://github.com/josenk/srandom
+	valgrind - a suite of tools for debugging and profiling : http://repo.or.cz/valgrind.git
+		# sudo apt-get install valgrind
+		# sudo valgrind --tool=memcheck ./sdk_perf_async
 
 ================================================
-Installation
+Installation (Please run commands below as root)
 
  
 build dpdk/spdk
 #make.sh intel
 
 
-build OpenMPDK-unvme libuio.a
+build libuio.a
 #make.sh all (Note: This is identical with ./make.sh driver && ./make.sh io && ./make.sh sdk)
 
 build app
@@ -46,15 +59,17 @@ build app
 
 ================================================
 Source tree
-uNVMe
+
+uNVMe/
 ├── app
 │   ├── external
 │   │   └── fio
-│   └── fio_plugin
+│   ├── fio_plugin
+│   ├── fuse
+│   ├── mkfs
+│   └── unvme_rocksdb
+├── bin
 ├── driver
-│   ├── build
-│   │   ├── debug
-│   │   └── release
 │   ├── core
 │   ├── external
 │   │   ├── common
@@ -63,17 +78,8 @@ uNVMe
 │   ├── include
 │   ├── mk
 │   └── test
-│       ├── command_ut
-│       ├── hash_perf
-│       ├── iterate
-│       ├── iterate_async
-│       ├── udd_perf
-│       └── udd_perf_async
 ├── include
 ├── io
-│   ├── deps
-│   ├── doxygen
-│   ├── kv_perf_scripts
 │   ├── src
 │   │   ├── common
 │   │   └── slab

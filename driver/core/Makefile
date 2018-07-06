@@ -2,6 +2,7 @@ include $(KV_DIR)/mk/kv.dd.mk
 
 KV_LIB = libkvnvmedd.a
 LIB = lib_kv_interface.a
+LIB_BDEV = lib_bdev_mpdk.a
 C_SRCS = kv_driver.c kv_interface.c kv_cmd.c lba_cmd.c kv_io.c lba_io.c kv_util.c kv_version.c
 
 DPDK_DIR = dpdk
@@ -14,7 +15,7 @@ processor=$(shell uname -p)
 kernel=$(shell uname -r)
 
 
-all : version $(LIB)
+all : version $(LIB_BDEV) $(LIB)
 	cp $(KV_DIR)/external/$(DPDK_DIR)/x86_64-native-linuxapp-gcc/lib/librte_eal.a .
 	cp $(KV_DIR)/external/$(DPDK_DIR)/x86_64-native-linuxapp-gcc/lib/librte_mempool.a .
 	cp $(KV_DIR)/external/$(DPDK_DIR)/x86_64-native-linuxapp-gcc/lib/librte_ring.a .
@@ -23,6 +24,11 @@ all : version $(LIB)
 	cp $(KV_DIR)/external/$(SPDK_DIR)/build/lib/libspdk_nvme.a .
 	cp $(KV_DIR)/external/$(SPDK_DIR)/build/lib/libspdk_util.a .
 	cp $(KV_DIR)/external/$(SPDK_DIR)/build/lib/libspdk_json.a .
+	cp $(KV_DIR)/external/$(SPDK_DIR)/build/lib/libspdk_bdev_nvme.a .
+	ar -x libspdk_bdev_nvme.a
+	ar -r libspdk_bdev_nvme.a blockdev*.o lba_bdev.o
+	rm -f blockdev*.o lba_bdev.o
+	mv libspdk_bdev_nvme.a $(KV_DIR)/external/$(SPDK_DIR)/build/lib/
 	ar -x $(LIB)
 	ar -x librte_eal.a
 	ar -x librte_mempool.a
@@ -45,6 +51,9 @@ version :
 	$(shell echo 'const char* processor="$(processor)";' >> kv_version.c)
 	$(shell echo 'const char* kernel="$(kernel)";' >> kv_version.c)
 	$(CC) $(CFLAGS) -c kv_version.c
+
+$(LIB_BDEV) :
+	$(CC) $(CFLAGS) -c lba_bdev.c
 
 clean :
 	rm -f *.a *.o

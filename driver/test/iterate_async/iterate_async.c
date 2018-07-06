@@ -122,10 +122,11 @@ int iterate_async() {
 	int value_size = 4096;
 	int key_length = 16;
 	int insert_count = 1 * 10000;
-	int iterate_count = 100;
+	int iterate_count = 10;
 	int iterate_read_size = 32 * 1024;
 	int host_hash = 0;/* 0:NONE, 1: Hash128_1_P128, 2: Hash128_2_P128, 3: MurmurHash3_x64_128 */
 	int check_miscompare = 1;
+	int qid = DEFAULT_IO_QUEUE_ID;
 	unsigned long long seed = 0x0102030405060708LL;
 	struct latency_stat stat;
 
@@ -212,6 +213,7 @@ int iterate_async() {
 		kv[i] = (kv_pair*)malloc(sizeof(kv_pair));
 		if(!kv[i])
 			return -ENOMEM;
+		kv[i]->keyspace_id = KV_KEYSPACE_IODATA;
 		kv[i]->value.value = kv_zalloc(value_size);
 		if(!kv[i]->value.value)
 			return -ENOMEM;
@@ -224,7 +226,7 @@ int iterate_async() {
 			Hash128_2_P128(kv[i]->value.value, value_size, seed, hash_value[i]);
 		}
 		//alloc key
-		kv[i]->key.key = kv_zalloc(key_length);
+		kv[i]->key.key = malloc(key_length + 1);
 		if(!kv[i]->key.key)
 			return -ENOMEM;
 
@@ -283,7 +285,7 @@ int iterate_async() {
 		ret = -EINVAL;
 		while(ret) {
 			gettimeofday(&stamps[i].start, NULL);
-			ret = kv_nvme_write_async(handle, kv[i]);
+			ret = kv_nvme_write_async(handle, qid, kv[i]);
 			//show_key(&key, &h_key);
 			if(ret) {
 				usleep(1);
@@ -329,7 +331,7 @@ int iterate_async() {
 		ret = -EINVAL;
 		while(ret) {
 			gettimeofday(&stamps[i].start, NULL);
-			ret = kv_nvme_read_async(handle, kv[i]);
+			ret = kv_nvme_read_async(handle, qid, kv[i]);
 			//show_key(&key, &h_key);
 			if(ret) {
 				usleep(1);
@@ -372,8 +374,8 @@ int iterate_async() {
         if(ret == KV_SUCCESS){
                 printf("iterate_handle count=%d\n",nr_iterate_handle);
                 for(i=0;i<nr_iterate_handle;i++){
-                        fprintf(stderr, "iterate_handle_info[%d] : info.handle_id=%d info.status=%d info.type=%d info.prefix=%08x info.bitmask=%08x\n",
-                                i+1, info[i].handle_id, info[i].status, info[i].type, info[i].prefix, info[i].bitmask);
+                        fprintf(stderr, "iterate_handle_info[%d] : info.handle_id=%d info.status=%d info.type=%d info.prefix=%08x info.bitmask=%08x info.is_eof=%d\n",
+                                i+1, info[i].handle_id, info[i].status, info[i].type, info[i].prefix, info[i].bitmask, info[i].is_eof);
                         if(info[i].status == ITERATE_HANDLE_OPENED){
                                 fprintf(stderr, "close iterate_handle : %d\n", info[i].handle_id);
                                 kv_nvme_iterate_close(handle, info[i].handle_id);
@@ -388,8 +390,9 @@ int iterate_async() {
 	uint32_t prefix;
 	memcpy(&prefix,kv[0]->key.key,2);
 	uint32_t iterator = KV_INVALID_ITERATE_HANDLE;
-	//iterator = kv_nvme_iterate_open(handle, bitmask, prefix, KV_KEY_ITERATE);
-	iterator = kv_nvme_iterate_open(handle, bitmask, prefix, KV_KEY_ITERATE_WITH_RETRIEVE);
+	uint8_t keyspace_id = KV_KEYSPACE_IODATA;
+	//iterator = kv_nvme_iterate_open(handle, keyspace_id, bitmask, prefix, KV_KEY_ITERATE);
+	iterator = kv_nvme_iterate_open(handle, keyspace_id, bitmask, prefix, KV_KEY_ITERATE_WITH_RETRIEVE);
 	gettimeofday(&end, NULL);
 	fprintf(stderr, "Done\n");
 	show_elapsed_time(&start,&end, "kv_nvme_iterate_open", 1, 0, NULL);
@@ -417,7 +420,7 @@ int iterate_async() {
 			ret = -EINVAL;
 			while(ret) {
 				gettimeofday(&stamps[i].start, NULL);
-				ret = kv_nvme_iterate_read_async(handle, it[i]);
+				ret = kv_nvme_iterate_read_async(handle, qid, it[i]);
 
 				if(ret) {
 					usleep(1);
@@ -455,7 +458,6 @@ int iterate_async() {
 	}
 
 	//Prepare deleting
-	/*
 	for(i = 0; i < insert_count; i++){
 		memset(kv[i]->value.value, 0, value_size);
 		kv[i]->param.async_cb = udd_delete_cb;
@@ -463,43 +465,40 @@ int iterate_async() {
 		kv[i]->param.io_option.delete_option = KV_DELETE_DEFAULT;
 	}
 
-	if(ssd_type == KV_TYPE_SSD) {
-		//NVMe Delete
-		fprintf(stderr,"kv_nvme_delete_async: ");
-		gettimeofday(&start, NULL);
-		for(i=0;i<insert_count;i++){
-			if(!(i%10000)){
-				fprintf(stderr,"%d ",i);
+	//NVMe Delete
+	fprintf(stderr,"kv_nvme_delete_async: ");
+	gettimeofday(&start, NULL);
+	for(i=0;i<insert_count;i++){
+		if(!(i%10000)){
+			fprintf(stderr,"%d ",i);
+		}
+
+		ret = -EINVAL;
+		while(ret) {
+			gettimeofday(&stamps[i].start, NULL);
+			ret = kv_nvme_delete_async(handle, qid, kv[i]);
+			if(ret) {
+				usleep(1);
+			} else {
+				delete_submit_cnt++;
+				break;
 			}
-
-			ret = -EINVAL;
-			while(ret) {
-				gettimeofday(&stamps[i].start, NULL);
-				ret = kv_nvme_delete_async(handle, kv[i]);
-				if(ret) {
-					usleep(1);
-				} else {
-					delete_submit_cnt++;
-					break;
-				}
-			}
-			//printf("value=%s\n",(char*)value[i]->value);
 		}
-		while(delete_complete_cnt < delete_submit_cnt) {
-			usleep(1);
-		}
-
-		gettimeofday(&end, NULL);
-		fprintf(stderr,"Done\n");
-
-		reset_latency_stat(&stat);
-		for (i = 0; i < insert_count; i++) {
-			add_latency_stat(&stat, &stamps[i].start, &stamps[i].end);
-		}
-		show_elapsed_time(&start,&end,"kv_nvme_delete_async", insert_count, value_size, &stat);
-		fprintf(stderr, "Received Delete Submit Count: %d, Delete Complete Count: %d\n", delete_submit_cnt, delete_complete_cnt);
+		//printf("value=%s\n",(char*)value[i]->value);
 	}
-	*/
+	while(delete_complete_cnt < delete_submit_cnt) {
+		usleep(1);
+	}
+
+	gettimeofday(&end, NULL);
+	fprintf(stderr,"Done\n");
+
+	reset_latency_stat(&stat);
+	for (i = 0; i < insert_count; i++) {
+		add_latency_stat(&stat, &stamps[i].start, &stamps[i].end);
+	}
+	show_elapsed_time(&start,&end,"kv_nvme_delete_async", insert_count, value_size, &stat);
+	fprintf(stderr, "Received Delete Submit Count: %d, Delete Complete Count: %d\n", delete_submit_cnt, delete_complete_cnt);
 
 	//Teardown Memory
 	fprintf(stderr, "Teardown Memory: ");
@@ -515,7 +514,7 @@ int iterate_async() {
 			fprintf(stderr, "%d ", i);
 		}
 		if(kv[i]->value.value) kv_free(kv[i]->value.value);
-		if(kv[i]->key.key) kv_free(kv[i]->key.key);
+		if(kv[i]->key.key) free(kv[i]->key.key);
 		if(kv[i]) free(kv[i]);
 	}
 	if(kv) free(kv);

@@ -55,8 +55,8 @@ static int g_nvme_socket_id = SPDK_ENV_SOCKET_ID_ANY;
  *  the contents of the submission and completion queues, it will show a longer
  *  history of data.
  */
-#define NVME_IO_ENTRIES		(256)
-#define NVME_IO_TRACKERS	(256)
+#define NVME_IO_ENTRIES		(2048)
+#define NVME_IO_TRACKERS	(2048)
 
 /*
  * NVME_MAX_SGL_DESCRIPTORS defines the maximum number of descriptors in one SGL
@@ -194,6 +194,7 @@ static int nvme_pcie_ctrlr_attach(spdk_nvme_probe_cb probe_cb, void *cb_ctx,
 				  struct spdk_pci_addr *pci_addr);
 static int nvme_pcie_qpair_construct(struct spdk_nvme_qpair *qpair);
 static int nvme_pcie_qpair_destroy(struct spdk_nvme_qpair *qpair);
+static void spdk_dump_nvme_cmd (const struct spdk_nvme_cmd *cmd);
 
 __thread struct nvme_pcie_ctrlr *g_thread_mmio_ctrlr = NULL;
 static volatile uint16_t g_signal_lock;
@@ -1085,8 +1086,10 @@ nvme_pcie_qpair_complete_tracker(struct spdk_nvme_qpair *qpair, struct nvme_trac
 		req->retries < spdk_nvme_retry_count;
 
 	if (error && print_on_error) {
-		nvme_qpair_print_command(qpair, &req->cmd);
-		nvme_qpair_print_completion(qpair, cpl);
+		if(cpl->status.sct != KV_NVME_SCT_ERROR && cpl->status.sc != KV_NVME_SC_NOT_EXIST_KEY){
+			nvme_qpair_print_command(qpair, &req->cmd);
+			nvme_qpair_print_completion(qpair, cpl);
+		}
 	}
 
 	was_active = pqpair->tr[cpl->cid].active;
@@ -1650,15 +1653,6 @@ nvme_pcie_qpair_build_contig_request(struct spdk_nvme_qpair *qpair, struct nvme_
 	}
 	*/
 
-	
-	//if(tr->req->cmd.opc == SPDK_NVME_OPC_KV_APPEND || tr->req->cmd.opc == SPDK_NVME_OPC_KV_STORE || tr->req->cmd.opc == SPDK_NVME_OPC_KV_RETRIEVE || tr->req->cmd.opc == SPDK_NVME_OPC_KV_DELETE ||
-	/*
-	if(tr->req->cmd.opc == SPDK_NVME_OPC_KV_ITERATE_REQUEST || tr->req->cmd.opc == SPDK_NVME_OPC_KV_ITERATE_READ ){
-		spdk_dump_nvme_cmd(&tr->req->cmd);
-		//return -1;
-	}
-	*/
-
 	return 0;
 }
 
@@ -1915,6 +1909,8 @@ nvme_pcie_qpair_submit_request(struct spdk_nvme_qpair *qpair, struct nvme_reques
 		goto exit;
 	}
 
+	//spdk_dump_nvme_cmd(&tr->req->cmd);
+
 	nvme_pcie_qpair_submit_tracker(qpair, tr);
 
 exit:
@@ -2048,3 +2044,55 @@ nvme_pcie_qpair_process_completions(struct spdk_nvme_qpair *qpair, uint32_t max_
 
 	return num_completions;
 }
+
+static void spdk_dump_nvme_cmd (const struct spdk_nvme_cmd *cmd) {
+	if(!cmd){
+		return;
+	}
+
+        printf("Dump nvme command: \n");
+        printf("\tDWORD0\n");
+        printf("\t\topc : 0x%04x\n", cmd->opc);
+        printf("\t\tfuse : 0x%04x\n", cmd->fuse);
+        printf("\t\trsvd1 : 0x%04x\n", cmd->rsvd1);
+        printf("\t\tpsdt : 0x%04x\n", cmd->psdt);
+        printf("\t\tcid : 0x%04x\n", cmd->cid);
+
+        printf("\tDWORD1");
+        printf("\tnsid : 0x%08x\n", cmd->nsid);
+
+        printf("\tDWORD2");
+        printf("\trsvd2 : 0x%08x\n", cmd->rsvd2);
+
+        printf("\tDWORD3");
+        printf("\trsvd3 : 0x%08x\n", cmd->rsvd3);
+
+        printf("\tDWORD4-5");
+        printf("\tmptr : 0x%016llx\n", (long long unsigned int)cmd->mptr);
+
+        printf("\tDWORD6-9\n");
+        printf("\t\tprp1 : 0x%016llx\n", (long long unsigned int)cmd->dptr.prp.prp1);
+        printf("\t\tprp2 : 0x%016llx\n", (long long unsigned int)cmd->dptr.prp.prp2);
+
+	printf("\tDWORD10");
+	printf("\tcdw10 : 0x%08x\n", cmd->cdw10);
+	printf("\tDWORD11");
+	printf("\tcdw11 : 0x%08x\n", cmd->cdw11);
+	printf("\tDWORD12");
+	printf("\tcdw12 : 0x%08x\n", cmd->cdw12);
+	printf("\tDWORD13");
+	printf("\tcdw13 : 0x%08x\n", cmd->cdw13);
+	printf("\tDWORD14");
+	printf("\tcdw14 : 0x%08x\n", cmd->cdw14);
+	printf("\tDWORD15");
+	printf("\tcdw15 : 0x%08x\n", cmd->cdw15);
+
+	char buf[32];
+	memset(buf,0,sizeof(buf));
+	memcpy(buf,(char*)&cmd->cdw12,4);
+	memcpy(buf+4,(char*)&cmd->cdw13,4);
+	memcpy(buf+8,(char*)&cmd->cdw14,4);
+	memcpy(buf+12,(char*)&cmd->cdw15,4);
+	printf("DWORD12-15: %s\n",buf);
+}
+

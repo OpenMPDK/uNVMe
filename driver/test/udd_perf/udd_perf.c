@@ -61,6 +61,7 @@ int udd_perf() {
 	int key_length = 16;
 	int value_size = 4096;
 	int insert_count = 10 * 10000;
+	int qid = DEFAULT_IO_QUEUE_ID;
 
 	int check_miscompare = 1;
 	unsigned long long seed = 0x0102030405060708LL;
@@ -142,6 +143,7 @@ int udd_perf() {
 		if(!kv[i])
 			return -ENOMEM;
 
+		kv[i]->keyspace_id = KV_KEYSPACE_IODATA;
 		kv[i]->key.key = kv_zalloc(key_length);
 		if(!kv[i]->key.key)
 			return -ENOMEM;
@@ -188,7 +190,7 @@ int udd_perf() {
 
 		//printf("key=%s\n",(char*)kv->key.key);
 		gettimeofday(&stamps[i].start, NULL);
-		if(kv_nvme_write(handle, kv[i]))
+		if(kv_nvme_write(handle, qid, kv[i]))
 			return -EINVAL;
 		gettimeofday(&stamps[i].end, NULL);
 	}
@@ -215,7 +217,7 @@ int udd_perf() {
 		}
 
 		gettimeofday(&stamps[i].start, NULL);
-		if(kv_nvme_read(handle, kv[i]))
+		if(kv_nvme_read(handle, qid, kv[i]))
 			return -EINVAL;
 		gettimeofday(&stamps[i].end, NULL);
 	}
@@ -239,34 +241,32 @@ int udd_perf() {
 		fprintf(stderr, "Miscompare count: %u\n", miscompare_cnt);
 	}
 
-	if (ssd_type == KV_TYPE_SSD) {
-		//Prepare deleting
-		for(i = 0; i < insert_count; i++){
-			memset(kv[i]->value.value, 0, value_size);
-			kv[i]->param.io_option.delete_option = KV_DELETE_DEFAULT;
-		}
-
-		//NVMe Delete
-		fprintf(stderr,"kv_nvme_delete: ");
-		gettimeofday(&start, NULL);
-		for(i = 0; i < insert_count; i++){
-			if(!(i % 10000)){
-				fprintf(stderr,"%d ",i);
-			}
-
-			gettimeofday(&stamps[i].start, NULL);
-			if(kv_nvme_delete(handle, kv[i]))
-				return -EINVAL;
-			gettimeofday(&stamps[i].end, NULL);
-		}
-		gettimeofday(&end, NULL);
-		fprintf(stderr,"Done\n");
-		reset_latency_stat(&stat);
-		for (i = 0; i < insert_count; i++) {
-			add_latency_stat(&stat, &stamps[i].start, &stamps[i].end);
-		}
-		show_elapsed_time(&start,&end,"kv_nvme_delete",insert_count, value_size, &stat);
+	//Prepare deleting
+	for(i = 0; i < insert_count; i++){
+		memset(kv[i]->value.value, 0, value_size);
+		kv[i]->param.io_option.delete_option = KV_DELETE_DEFAULT;
 	}
+
+	//NVMe Delete
+	fprintf(stderr,"kv_nvme_delete: ");
+	gettimeofday(&start, NULL);
+	for(i = 0; i < insert_count; i++){
+		if(!(i % 10000)){
+			fprintf(stderr,"%d ",i);
+		}
+
+		gettimeofday(&stamps[i].start, NULL);
+		if(kv_nvme_delete(handle, qid, kv[i]))
+			return -EINVAL;
+		gettimeofday(&stamps[i].end, NULL);
+	}
+	gettimeofday(&end, NULL);
+	fprintf(stderr,"Done\n");
+	reset_latency_stat(&stat);
+	for (i = 0; i < insert_count; i++) {
+		add_latency_stat(&stat, &stamps[i].start, &stamps[i].end);
+	}
+	show_elapsed_time(&start,&end,"kv_nvme_delete",insert_count, value_size, &stat);
 
 	//Teardown Memory
 	fprintf(stderr, "Teardown Memory: ");

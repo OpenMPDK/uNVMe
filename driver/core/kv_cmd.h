@@ -34,19 +34,20 @@
 #ifndef _KVCMD_H_
 #define _KVCMD_H_
 
-int _kv_nvme_store(kv_nvme_t *nvme, const kv_pair *kv, int core_id, uint8_t is_store);
-int _kv_nvme_store_async(kv_nvme_t *nvme, const kv_pair *kv, int core_id);
-int _kv_nvme_retrieve(kv_nvme_t *nvme, kv_pair *kv, int core_id);
-int _kv_nvme_retrieve_async(kv_nvme_t *nvme, kv_pair *kv, int core_id);
-int _kv_nvme_delete(kv_nvme_t *nvme, const kv_pair *kv, int core_id);
-int _kv_nvme_delete_async(kv_nvme_t *nvme, const kv_pair *kv, int core_id);
-int _kv_nvme_format(kv_nvme_t *nvme);
+int _kv_nvme_store(kv_nvme_t *nvme, const kv_pair *kv, int qid, uint8_t is_store);
+int _kv_nvme_store_async(kv_nvme_t *nvme, const kv_pair *kv, int qid);
+int _kv_nvme_retrieve(kv_nvme_t *nvme, kv_pair *kv, int qid);
+int _kv_nvme_retrieve_async(kv_nvme_t *nvme, kv_pair *kv, int qid);
+int _kv_nvme_delete(kv_nvme_t *nvme, const kv_pair *kv, int qid);
+int _kv_nvme_delete_async(kv_nvme_t *nvme, const kv_pair *kv, int qid);
+int _kv_nvme_format(kv_nvme_t *nvme, int ses);
 uint64_t _kv_nvme_get_used_size(kv_nvme_t* nvme);
-int _kv_nvme_exist(kv_nvme_t* nvme, const kv_key_list* key_list, kv_value* result, int core_id);
-uint32_t _kv_nvme_iterate_open(kv_nvme_t *nvme, const uint32_t bitmask, const uint32_t prefix, const uint8_t iterate_type, int core_id);
-int _kv_nvme_iterate_close(kv_nvme_t *nvme, const uint8_t iterator, int core_id);
-int _kv_nvme_iterate_read(kv_nvme_t* nvme, kv_iterate* it, int core_id);
-int _kv_nvme_iterate_read_async(kv_nvme_t *nvme, kv_iterate* it, int core_id);
+int _kv_nvme_exist(kv_nvme_t* nvme, const kv_pair* kv, int qid);
+int _kv_nvme_exist_async(kv_nvme_t* nvme, const kv_pair* kv, int qid);
+uint32_t _kv_nvme_iterate_open(kv_nvme_t *nvme, const uint8_t keyspace_id, const uint32_t bitmask, const uint32_t prefix, const uint8_t iterate_type, int qid);
+int _kv_nvme_iterate_close(kv_nvme_t *nvme, const uint8_t iterator, int qid);
+int _kv_nvme_iterate_read(kv_nvme_t* nvme, kv_iterate* it, int qid);
+int _kv_nvme_iterate_read_async(kv_nvme_t *nvme, kv_iterate* it, int qid);
 
 #endif
 

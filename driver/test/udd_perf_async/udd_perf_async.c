@@ -105,7 +105,8 @@ int udd_perf_async() {
 
 	int value_size = 4096;
 	int key_length = 16;
-	unsigned int ssd_type = KV_TYPE_SSD;
+	int qid = DEFAULT_IO_QUEUE_ID;
+	unsigned int ssd_type = LBA_TYPE_SSD;
 	int insert_count = 10 * 10000;
 	int host_hash = 0;/* 0:NONE, 1: Hash128_1_P128, 2: Hash128_2_P128, 3: MurmurHash3_x64_128 */
 	int check_miscompare = 1;
@@ -195,6 +196,7 @@ int udd_perf_async() {
 		kv[i] = (kv_pair*)malloc(sizeof(kv_pair));
 		if(!kv[i])
 			return -ENOMEM;
+		kv[i]->keyspace_id = KV_KEYSPACE_IODATA;
 		kv[i]->value.value = kv_zalloc(value_size);
 		if(!kv[i]->value.value)
 			return -ENOMEM;
@@ -207,7 +209,7 @@ int udd_perf_async() {
 			Hash128_2_P128(kv[i]->value.value, value_size, seed, hash_value[i]);
 		}
 		//alloc key
-		kv[i]->key.key = kv_zalloc(key_length);
+		kv[i]->key.key = malloc(key_length + 1);
 		if(!kv[i]->key.key)
 			return -ENOMEM;
 
@@ -247,7 +249,7 @@ int udd_perf_async() {
 		ret = -EINVAL;
 		while(ret) {
 			gettimeofday(&stamps[i].start, NULL);
-			ret = kv_nvme_write_async(handle, kv[i]);
+			ret = kv_nvme_write_async(handle, qid, kv[i]);
 			//show_key(&key, &h_key);
 			if(ret) {
 				usleep(1);
@@ -293,7 +295,7 @@ int udd_perf_async() {
 		ret = -EINVAL;
 		while(ret) {
 			gettimeofday(&stamps[i].start, NULL);
-			ret = kv_nvme_read_async(handle, kv[i]);
+			ret = kv_nvme_read_async(handle, qid, kv[i]);
 			//show_key(&key, &h_key);
 			if(ret) {
 				usleep(1);
@@ -322,7 +324,7 @@ int udd_perf_async() {
 	if(check_miscompare){
 		for (i = 0; i < insert_count; i++) {
 			unsigned long long tmp_hash[2];
-			Hash128_2_P128(kv[i]->value.value, kv[i]->value.length, seed, tmp_hash);
+			Hash128_2_P128(kv[i]->value.value, value_size, seed, tmp_hash);
 			if (memcmp((void*)tmp_hash, (void*)hash_value[i],sizeof(tmp_hash)))
 				miscompare_cnt++;
 		}
@@ -337,42 +339,40 @@ int udd_perf_async() {
 		kv[i]->param.io_option.delete_option = KV_DELETE_DEFAULT;
 	}
 
-	if(ssd_type == KV_TYPE_SSD) {
-		//NVMe Delete
-		fprintf(stderr,"kv_nvme_delete_async: ");
-		gettimeofday(&start, NULL);
-		for(i=0;i<insert_count;i++){
-			if(!(i%10000)){
-				fprintf(stderr,"%d ",i);
+	//NVMe Delete
+	fprintf(stderr,"kv_nvme_delete_async: ");
+	gettimeofday(&start, NULL);
+	for(i=0;i<insert_count;i++){
+		if(!(i%10000)){
+			fprintf(stderr,"%d ",i);
+		}
+
+		ret = -EINVAL;
+		while(ret) {
+			gettimeofday(&stamps[i].start, NULL);
+			ret = kv_nvme_delete_async(handle, qid, kv[i]);
+			if(ret) {
+				usleep(1);
+			} else {
+				delete_submit_cnt++;
+				break;
 			}
-
-			ret = -EINVAL;
-			while(ret) {
-				gettimeofday(&stamps[i].start, NULL);
-				ret = kv_nvme_delete_async(handle, kv[i]);
-				if(ret) {
-					usleep(1);
-				} else {
-					delete_submit_cnt++;
-					break;
-				}
-			}
-			//printf("value=%s\n",(char*)value[i]->value);
 		}
-		while(delete_complete_cnt < delete_submit_cnt) {
-			usleep(1);
-		}
-
-		gettimeofday(&end, NULL);
-		fprintf(stderr,"Done\n");
-
-		reset_latency_stat(&stat);
-		for (i = 0; i < insert_count; i++) {
-			add_latency_stat(&stat, &stamps[i].start, &stamps[i].end);
-		}
-		show_elapsed_time(&start,&end,"kv_nvme_delete_async", insert_count, value_size, &stat);
-		fprintf(stderr, "Received Delete Submit Count: %d, Delete Complete Count: %d\n", delete_submit_cnt, delete_complete_cnt);
+		//printf("value=%s\n",(char*)value[i]->value);
 	}
+	while(delete_complete_cnt < delete_submit_cnt) {
+		usleep(1);
+	}
+
+	gettimeofday(&end, NULL);
+	fprintf(stderr,"Done\n");
+
+	reset_latency_stat(&stat);
+	for (i = 0; i < insert_count; i++) {
+		add_latency_stat(&stat, &stamps[i].start, &stamps[i].end);
+	}
+	show_elapsed_time(&start,&end,"kv_nvme_delete_async", insert_count, value_size, &stat);
+	fprintf(stderr, "Received Delete Submit Count: %d, Delete Complete Count: %d\n", delete_submit_cnt, delete_complete_cnt);
 
 	//Teardown Memory
 	fprintf(stderr, "Teardown Memory: ");
@@ -382,7 +382,7 @@ int udd_perf_async() {
 			fprintf(stderr, "%d ", i);
 		}
 		if(kv[i]->value.value) kv_free(kv[i]->value.value);
-		if(kv[i]->key.key) kv_free(kv[i]->key.key);
+		if(kv[i]->key.key) free(kv[i]->key.key);
 		if(kv[i]) free(kv[i]);
 	}
 	free(kv);

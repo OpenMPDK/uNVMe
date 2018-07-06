@@ -42,10 +42,6 @@
  * Make data 'd' or pointer 'p', n-byte aligned, where n is a power of 2
  */
 #define KVSLAB_ALIGNMENT        sizeof(unsigned long) /* platform word */
-#define KVSLAB_ALIGN(d, n)      ((size_t)(((d) + (n - 1)) & ~(n - 1)))
-#define KVSLAB_ALIGN_PTR(p, n)  \
-    (void *) (((uintptr_t) (p) + ((uintptr_t) n - 1)) & ~((uintptr_t) n - 1))
-
 #define KVSLAB_ASSERT(_x) do {	\
 	if (!(_x)) {		\
 		abort();	\

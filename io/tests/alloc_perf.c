@@ -93,7 +93,7 @@ START_TEST(alloc_perf){
 		//SLAB ALLOC
 		int nr_slab = 1;
 		size_t add_mem_size = (size_t)0;
-		kvslab_init(1ull*1024*1024*1024, SLAB_MM_ALLOC_POSIX, nr_slab, add_mem_size);
+		kvslab_init(1ull*1024*1024*1024, SLAB_MM_ALLOC_POSIX, nr_slab);
 	
 		gettimeofday(&start, NULL);
 		for(i=0;i<insert_count;i++){

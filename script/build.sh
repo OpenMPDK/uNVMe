@@ -109,15 +109,17 @@ build_app(){
 	fi
 	cd app
 
-	log_normal "[Build App - fio_plugin]"
-	cd fio_plugin
-	make clean && make
-	ret=$?
-	cd ..
-	if [ $ret = 0 ]; then
-		log_normal "[Build App - fio_plugin].. Done"
-	else
-		log_error "[Build App - fio_plugin].. Error"
+	if [ -d "fio_plugin" ]; then
+		log_normal "[Build App - fio_plugin]"
+		cd fio_plugin
+		make clean && make
+		ret=$?
+		cd ..
+		if [ $ret = 0 ]; then
+			log_normal "[Build App - fio_plugin].. Done"
+		else
+			log_error "[Build App - fio_plugin].. Error"
+		fi
 	fi
 
 	if [ -d "nvme_cli" ]; then
@@ -143,6 +145,45 @@ build_app(){
 			log_normal "[Build App - kv_db_bench].. Done"
 		else
 			log_error "[Build App - kv_db_bench].. Error"
+		fi
+	fi
+
+	if [ -d "mkfs" ]; then
+		log_normal "[Build App - mkfs]"
+		cd mkfs
+		make
+		ret=$?
+		cd ..
+		if [ $ret = 0 ]; then
+			log_normal "[Build App - mkfs].. Done"
+		else
+			log_error "[Build App - mkfs].. Error"
+		fi
+	fi
+
+	if [ -d "fuse" ]; then
+		log_normal "[Build App - fuse]"
+		cd fuse
+		make
+		ret=$?
+		cd ..
+		if [ $ret = 0 ]; then
+			log_normal "[Build App - fuse].. Done"
+		else
+			log_error "[Build App - fuse].. Error"
+		fi
+	fi
+
+	if [ -d "unvme_rocksdb" ]; then
+		log_normal "[Build App - unvme_rocksdb]"
+		cd unvme_rocksdb
+		make db_bench -j 4
+		ret=$?
+		cd ..
+		if [ $ret = 0 ]; then
+			log_normal "[Build App - unvme_rocksdb].. Done"
+		else
+			log_error "[Build App - unvme_rocksdb].. Error"
 		fi
 	fi
 
@@ -243,7 +284,10 @@ build_mpdk(){
 	cd $mpdk_dir/$prefix
 	rm -rf app/kv_fatcache
 	rm -rf app/kv_rocksdb
-	rm -rf app/nvme_cli
+	#rm -rf app/nvme_cli
+	#rm -rf app/mkfs
+	#rm -rf app/fuse
+	#rm -rf app/unvme_rocksdb
 	rm -rf app/external/performance/script/memtier_benchmark
 	rm -rf app/external/performance
 	rm -rf app/external/twemperf
@@ -259,6 +303,7 @@ build_mpdk(){
 	rm -rf driver/external/common/MurmurHash3.h
 
 	rm -rf io/deps/check-0.9.8
+	rm -rf io/deps
 	rm -rf io/src/jsmn.c
 	rm -rf io/src/jsmn.h
 	rm -rf io/src/common/MurmurHash3.c
@@ -266,6 +311,8 @@ build_mpdk(){
 	
 	rm -rf io/tests/runner.c
 	rm -rf io/tests/test_json.c
+
+	rm -rf patch
 	
 	ret=$?
 	if [ $ret = 0 ]; then

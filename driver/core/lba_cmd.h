@@ -38,7 +38,9 @@ int _lba_nvme_write(kv_nvme_t *nvme, const kv_pair *kv, int core_id, uint8_t is_
 int _lba_nvme_write_async(kv_nvme_t *nvme, const kv_pair *kv, int core_id);
 int _lba_nvme_read(kv_nvme_t *nvme, kv_pair* kv, int core_id);
 int _lba_nvme_read_async(kv_nvme_t *nvme, kv_pair *kv, int core_id);
-int _lba_nvme_format(kv_nvme_t *nvme);
+int _lba_nvme_delete(kv_nvme_t *nvme, const kv_pair* kv, int core_id);
+int _lba_nvme_delete_async(kv_nvme_t *nvme, const kv_pair *kv, int core_id);
+int _lba_nvme_format(kv_nvme_t *nvme, int ses);
 uint64_t _lba_nvme_get_used_size(kv_nvme_t* nvme);
 
 #endif

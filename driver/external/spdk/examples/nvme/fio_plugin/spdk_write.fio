@@ -1,5 +1,5 @@
 [global]
-ioengine=./examples/nvme/fio_plugin/fio_plugin
+ioengine=./fio_plugin
 thread=1
 group_reporting=1
 direct=1
@@ -13,3 +13,4 @@ bs=4k
 
 [test]
 numjobs=1
+filename=trtype=PCIe traddr=0000.0a.00.0 ns=1

@@ -37,12 +37,12 @@ typedef struct {
 } thread_param;
 
 // thread variables
-unsigned int* g_iterate_read_complete_count;
+unsigned int g_iterate_read_complete_count[KV_MAX_ITERATE_HANDLE];
 
-long* total_time;
-int* num_read_key;
+long* g_total_time;
+int g_num_read_key[KV_MAX_ITERATE_HANDLE];
 
-int nr_it_handle = 1;
+int g_nr_it_handle = 1;
 
 // global variables
 int nthreads = 0;
@@ -63,7 +63,7 @@ kv_iterate** it;
 void myalarm() {
 	int i;
 	for (i = 0; i < nthreads; i++) {
-		fprintf(stdout, "    [tid=%d]num_read_key=%d, complete_count=%d\n", i, num_read_key[i], g_iterate_read_complete_count[i]);
+		fprintf(stdout, "    [tid=%d]num_read_key=%d, complete_count=%u\n", i, g_num_read_key[i], g_iterate_read_complete_count[i]);
 	}
 	fprintf(stdout, "\n");
         fflush(stdout);
@@ -84,6 +84,7 @@ void prepare_app_memory(int nthreads) {
 		kv[i] = (kv_pair*) malloc(sizeof(kv_pair));
 		fail_unless(kv[i] != NULL);
 
+		kv[i]->keyspace_id = KV_KEYSPACE_IODATA;
 		kv[i]->key.key = malloc(key_length + 1);
 		fail_unless(kv[i]->key.key != NULL);
 		kv[i]->key.length = key_length;
@@ -122,13 +123,9 @@ void prepare_app_memory(int nthreads) {
 		fail_unless(it[i]->kv.param.private_data);
 	}
 
-	g_iterate_read_complete_count = (int*)calloc(nthreads, sizeof(int));
-	fail_unless(g_iterate_read_complete_count != NULL);
 
-	total_time = (long*)calloc(nthreads, sizeof(long));
-	fail_unless(total_time);
-	num_read_key = (int*)calloc(nthreads, sizeof(int));
-	fail_unless(num_read_key);
+	g_total_time = (long*)calloc(nthreads, sizeof(long));
+	fail_unless(g_total_time);
 }
 
 void teardown_memory(int nthreads) {
@@ -153,10 +150,7 @@ void teardown_memory(int nthreads) {
 	}
 	if (it) free(it);
 
-	if(g_iterate_read_complete_count) free(g_iterate_read_complete_count);
-
-	if(total_time) free(total_time);
-	if(num_read_key) free(num_read_key);
+	if(g_total_time) free(g_total_time);
 }
 
 void* sdk_write(void* data) {
@@ -207,13 +201,14 @@ void* sdk_iterate(void* data) {
 
 	uint32_t bitmask = 0xFFFFFFFF;
 	uint32_t prefix = 0;
+	uint8_t keyspace_id = KV_KEYSPACE_IODATA;
 	char tmp_prefix[5] ={""};
 	sprintf(tmp_prefix, "%04x", tid);
 	memcpy(&prefix, tmp_prefix, sizeof(uint32_t));
 	uint32_t iterator = KV_INVALID_ITERATE_HANDLE;
-	fprintf(stdout, "[tid=%d]Iterate Open : bitmask=%x bit_pattern=%x\n", tid, bitmask, prefix);
+	fprintf(stdout, "[tid=%d]Iterate Open : keyspace_id=%d bitmask=%x bit_pattern=%x\n", tid, keyspace_id, bitmask, prefix);
 
-	iterator = kv_iterate_open(handle, bitmask, prefix, iterate_type);
+	iterator = kv_iterate_open(handle, keyspace_id, bitmask, prefix, iterate_type);
 	if (iterator != KV_INVALID_ITERATE_HANDLE) {
 		fprintf(stdout, "[tid=%d]Iterate open success : iterator id=%d\n", tid, iterator);
 		gettimeofday(param->t_start, NULL);
@@ -230,14 +225,14 @@ void* sdk_iterate(void* data) {
 			g_iterate_read_complete_count[tid]++;
 			if (it[tid]->kv.value.length > 0) {
 				if(it[tid]->kv.key.length == 0) {
-					num_read_key[tid] += it[tid]->kv.value.length / 16;
+					g_num_read_key[tid] += it[tid]->kv.value.length / 16;
 				} else {
-					num_read_key[tid]++;
+					g_num_read_key[tid]++;
 				}
 			}
 		} while(ret == KV_SUCCESS);
 		gettimeofday(param->t_end, NULL);
-		total_time[tid] = ((param->t_end->tv_sec - param->t_start->tv_sec) * 1000000) + param->t_end->tv_usec - param->t_start->tv_usec;
+		g_total_time[tid] = ((param->t_end->tv_sec - param->t_start->tv_sec) * 1000000) + param->t_end->tv_usec - param->t_start->tv_usec;
 		kv_iterate_close(handle, iterator);
 	}
 }
@@ -271,7 +266,7 @@ int sdk_iterate_sync(void) {
 	memset(&sdk_opt, 0, sizeof(kv_sdk));
 	strcpy(sdk_opt.dev_id[0], "0000:02:00.0");
 	sdk_opt.dd_options[0].core_mask = 0x0;
-	for(i = 0; i < nr_it_handle; i++) {
+	for(i = 0; i < g_nr_it_handle; i++) {
 		sdk_opt.dd_options[0].core_mask |= (1 << i);
 	}
 	sdk_opt.dd_options[0].sync_mask = sdk_opt.dd_options[0].core_mask;
@@ -333,8 +328,8 @@ int sdk_iterate_sync(void) {
 	if (ret == KV_SUCCESS) {
 		printf("iterate_handle count=%d\n", nr_iterate_handle);
 		for (i = 0; i < nr_iterate_handle; i++) {
-			printf("iterate_handle_info[%d] : info.handle_id=%d info.status=%d info.type=%d info.prefix=%08x info.bitmask=%08x\n",
-					i + 1, info[i].handle_id, info[i].status, info[i].type, info[i].prefix, info[i].bitmask);
+			printf("iterate_handle_info[%d] : info.handle_id=%d info.status=%d info.type=%d info.prefix=%08x info.bitmask=%08x info.is_eof=%d\n",
+					i + 1, info[i].handle_id, info[i].status, info[i].type, info[i].prefix, info[i].bitmask, info[i].is_eof);
 			if (info[i].status == ITERATE_HANDLE_OPENED) {
 				printf("close iterate_handle : %d\n", info[i].handle_id);
 				kv_iterate_close(arr_handle[0], info[i].handle_id);
@@ -355,7 +350,7 @@ int sdk_iterate_sync(void) {
 
 	FILE* fp = fopen("result.txt", "a");
 	for (i = 0; i < nthreads; i++) {
-		fprintf(fp, "% 12d   % 11ld    ", num_read_key[i], total_time[i]/1000);
+		fprintf(fp, "% 12d   % 11ld    ", g_num_read_key[i], g_total_time[i]/1000);
 	}
 	fprintf(fp, "\n");
 	fclose(fp);
@@ -386,8 +381,8 @@ int main(int argc, char** argv) {
 		start_point = atoi(argv[1]);
 	}
 	if (argc > 2) {
-		nr_it_handle = atoi(argv[2]);
-		if(nr_it_handle < 1 || nr_it_handle > 7) {
+		g_nr_it_handle = atoi(argv[2]);
+		if(g_nr_it_handle < 1 || g_nr_it_handle > 7) {
 			fprintf(stderr, "FAIL: invalid it_handle range");
 			exit(1);
 		}

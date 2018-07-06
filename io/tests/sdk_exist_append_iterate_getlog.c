@@ -158,10 +158,12 @@ START_TEST(sdk_exist_append_iterate){
                 kv[i] = (kv_pair*)malloc(sizeof(kv_pair));
 		fail_unless(kv[i] != NULL);
 
-                kv[i]->key.key = malloc(key_length);
+                kv[i]->key.key = malloc(key_length + 1);
 		fail_unless(kv[i]->key.key != NULL);
 		kv[i]->key.length = key_length;
-                memset(kv[i]->key.key,0,key_length);
+                memset(kv[i]->key.key,0,key_length + 1);
+
+                kv[i]->keyspace_id = KV_KEYSPACE_IODATA;
 
                 kv[i]->value.value = malloc(value_size*2); //for retrieve appended kv pair
 		fail_unless(kv[i]->value.value != NULL);
@@ -186,7 +188,7 @@ START_TEST(sdk_exist_append_iterate){
 		kv[i]->param.io_option.store_option = KV_STORE_DEFAULT;
 		kv[i]->param.private_data = NULL;
 		kv[i]->param.async_cb = NULL;
-		fail_unless(0 == kv_store(handle, kv[i]));
+		fail_unless(KV_SUCCESS == kv_store(handle, kv[i]));
 		//printf("WRITE k=%s v=%s\n",(char*)kv[i]->key.key,(char*)kv[i]->value.value);
 	}
 	gettimeofday(&end, NULL);
@@ -227,68 +229,30 @@ START_TEST(sdk_exist_append_iterate){
 		kv[i]->param.io_option.retrieve_option = KV_RETRIEVE_DEFAULT;
 		kv[i]->param.private_data = NULL;
 		kv[i]->param.async_cb = NULL;
-		fail_unless(0 == kv_retrieve(handle, kv[i])); //NOTE: a length of the data retrieved should be same with 2*value_size
+		fail_unless(KV_SUCCESS == kv_retrieve(handle, kv[i])); //NOTE: a length of the data retrieved should be same with 2*value_size
 		//printf("READ k=%s v=%s\n",(char*)kv[i]->key.key,(char*)kv[i]->value.value);
 	}
 	gettimeofday(&end, NULL);
 	fprintf(stderr,"Done\n");
 	show_elapsed_time(&start,&end,"kv_retrieve",insert_count, value_size, NULL);
 
-	//SDK Exist Before Delete
-	/*
-        kv_key_list key_list;
-        kv_value exist_result;
-
-        fprintf(stderr, "Exist Before Delete\n");
-        key_list.buffer = kv_zalloc(value_size);
-        key_list.key_length = key_length;
-        key_list.key_number = 0;
-        key_list.option = KV_EXIST_DEFAULT;
-
-        exist_result.value = kv_zalloc(value_size);
-        exist_result.length = value_size;
-
-        for(i = 0 ; i < value_size/key_length; i++){
-                sprintf(key_list.buffer+(i*key_length),"mountain%08x",i);
-                key_list.key_number++;
-        }
-        fprintf(stderr, "key_list.buffer=%s\n",(char*)key_list.buffer);
-        fprintf(stderr, "key_list.key_number=%d\n",key_list.key_number);
-        fprintf(stderr, "[%s] key_list.buffer=%lx result.buffer=%lx\n",__FUNCTION__,(uint64_t)key_list.buffer, (uint64_t)exist_result.value);
-
-        gettimeofday(&start, NULL);
-        fail_unless(0 == kv_exist(handle, &key_list, &exist_result));
-        gettimeofday(&end, NULL);
-        show_elapsed_time(&start,&end,"kv_exist_before_delete", key_list.key_number, 0, NULL);
-
-        for(i = 0; i < key_list.key_number; i++){
-                if(!(i%key_length)){
-                        fprintf(stderr, "\n");
-                }
-                fprintf(stderr, "%d ",*((char*)exist_result.value+i));
-        }
-        fprintf(stderr, "\n");
-	*/
-
-        //SDK Iterate
-	/*
-        fprintf(stderr, "Iterate\n");
-        kv_iterate_options iterate;
-        iterate.bitmask = 0xA5A5;
-        iterate.bit_pattern = 0x5A5A;
-        iterate.option = KV_ITERATE_DEFAULT;
-
-        kv_value iterate_result;
-        iterate_result.value = kv_zalloc(value_size);
-        iterate_result.length = value_size;
-        fprintf(stderr, "[%s] iterate.bitmask=%lx iterate.bit_pattern=%lx\n",__FUNCTION__,(uint64_t)iterate.bitmask, (uint64_t)iterate.bit_pattern);
-        fprintf(stderr, "[%s] iterate_result.value=%lx \n",__FUNCTION__,(uint64_t)iterate_result.value);
-
-        gettimeofday(&start, NULL);
-        fail_unless(0 == kv_iterate(handle, &iterate, &iterate_result));
-        gettimeofday(&end, NULL);
-	show_elapsed_time(&start,&end,"kv_iterate", 0, 0, NULL);
-	*/
+	//SDK Exist
+	fprintf(stderr,"kv_exist: - before delete ");
+	gettimeofday(&start, NULL);
+	for(i=0;i<insert_count;i++){
+		if(!(i%10000)){
+			fprintf(stderr,"%d ",i);
+		}
+		sprintf(kv[i]->key.key, "mountain%08x",i);
+		kv[i]->key.length=strlen(kv[i]->key.key);
+		kv[i]->param.io_option.exist_option = KV_EXIST_DEFAULT;
+		kv[i]->param.private_data = NULL;
+		kv[i]->param.async_cb = NULL;
+		fail_unless(KV_SUCCESS == kv_exist(handle, kv[i]));
+	}
+	gettimeofday(&end, NULL);
+	fprintf(stderr,"Done\n");
+	show_elapsed_time(&start,&end,"kv_exist - before delete",insert_count, 0, NULL);
 
 	//SDK Delete
 	fprintf(stderr,"kv_delete: ");
@@ -302,36 +266,29 @@ START_TEST(sdk_exist_append_iterate){
 		kv[i]->param.io_option.delete_option = KV_DELETE_DEFAULT;
 		kv[i]->param.private_data = NULL;
 		kv[i]->param.async_cb = NULL;
-		fail_unless(0 == kv_delete(handle, kv[i]));
+		fail_unless(KV_SUCCESS == kv_delete(handle, kv[i]));
 	}
 	gettimeofday(&end, NULL);
 	fprintf(stderr,"Done\n");
-	show_elapsed_time(&start,&end,"kv_delete",insert_count, value_size, NULL);
+	show_elapsed_time(&start,&end,"kv_delete",insert_count, 0, NULL);
 
-        //SDK Exist After Delete
-	/*
-        fprintf(stderr,"Exist After Delete\n");
-        key_list.key_number = 0;
-        for(i = 0 ; i < value_size/key_length; i++){
-                sprintf(key_list.buffer+(i*key_length),"mountain%08x",i);
-                key_list.key_number++;
-        }
-        fprintf(stderr,"key_list.buffer=%s\n",(char*)key_list.buffer);
-        fprintf(stderr,"key_list.key_number=%d\n",key_list.key_number);
-
-        gettimeofday(&start, NULL);
-        fail_unless(0 == kv_exist(handle, &key_list, &exist_result));
-        gettimeofday(&end, NULL);
-        show_elapsed_time(&start,&end,"kv_exist_after_delete", key_list.key_number, 0, NULL);
-
-        for(i = 0; i < key_list.key_number; i++){
-                if(!(i%key_length)){
-                        fprintf(stderr, "\n");
-                }
-                fprintf(stderr, "%d ",*((char*)exist_result.value+i));
-        }
-        fprintf(stderr, "\n");
-	*/
+	//SDK Exist
+	fprintf(stderr,"kv_exist: - after delete");
+	gettimeofday(&start, NULL);
+	for(i=0;i<insert_count;i++){
+		if(!(i%10000)){
+			fprintf(stderr,"%d ",i);
+		}
+		sprintf(kv[i]->key.key, "mountain%08x",i);
+		kv[i]->key.length=strlen(kv[i]->key.key);
+		kv[i]->param.io_option.exist_option = KV_EXIST_DEFAULT;
+		kv[i]->param.private_data = NULL;
+		kv[i]->param.async_cb = NULL;
+		fail_unless(KV_ERR_NOT_EXIST_KEY == kv_exist(handle, kv[i]));
+	}
+	gettimeofday(&end, NULL);
+	fprintf(stderr,"Done\n");
+	show_elapsed_time(&start,&end,"kv_exist - after delete",insert_count, 0, NULL);
 
 	//Teardown Memory
 	fprintf(stderr,"Teardown Memory: ");

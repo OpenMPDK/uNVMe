@@ -99,7 +99,7 @@ START_TEST(alloc_udd_perf){
 		//SLAB(POSIX) ALLOC
 		int nr_slab = 1;
 		size_t add_mem_size = (size_t)0;
-		kvslab_init(target_slab_size_mb*1024*1024ull, SLAB_MM_ALLOC_POSIX, nr_slab, add_mem_size);
+		kvslab_init(target_slab_size_mb*1024*1024ull, SLAB_MM_ALLOC_POSIX, nr_slab);
 	
 		fprintf(stderr,"SLAB Setup Memory: ");
 		gettimeofday(&start, NULL);

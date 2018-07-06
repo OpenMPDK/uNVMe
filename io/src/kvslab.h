@@ -37,7 +37,7 @@
 #include "kv_apis.h"
 #include "kvslab_core.h"
 
-int kvslab_init(size_t mem_size, int slab_alloc_policy, int nr_ssd, size_t add_mem_size);
+int kvslab_init(size_t total_slab_size, int slab_alloc_policy, int nr_ssd);
 int kvslab_destroy();
 
 kv_pair* posix_alloc_pair(int key_len, int value_len, int flag);

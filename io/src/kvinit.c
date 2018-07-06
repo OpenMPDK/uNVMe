@@ -104,9 +104,9 @@ static void parse_description(struct spdk_json_val* values, int idx, kv_nvme_io_
 
 	}
 
-        if (opt.core_mask && opt.cq_thread_mask){
-                //set options only when core_mask, (sync_mask), and cq_mask are set all.
-                //else, use default.
+        if (opt.core_mask){
+                //If core_mask is set, other options(sync_mask, cq_thread_mask) are considered as set also,
+                //even though the options are not specified in JSON explicitly. This case, sync_mask and cq_thread_mask are considered as 0
                 opt_dst->core_mask = opt.core_mask;
                 opt_dst->sync_mask = opt.sync_mask;
                 opt_dst->cq_thread_mask = opt.cq_thread_mask;
@@ -123,9 +123,10 @@ void dump_kv_sdk_options(void){
 	fprintf(stderr, "use_cache: %d \t\t(0: false, 1: true)\n", g_sdk.use_cache);
 	fprintf(stderr, "cache algorithm: %d \t(0: radix)\n", g_sdk.cache_algorithm);
 	fprintf(stderr, "cache reclaim policy: %d (0: LRU)\n", g_sdk.cache_reclaim_policy);
-	fprintf(stderr, "slab size: %lu \t(%luMB)\n", g_sdk.slab_size, g_sdk.slab_size/1024/1024);
+	fprintf(stderr, "slab size: %lu \t(%luMB)\n", g_sdk.slab_size, g_sdk.slab_size/MB);
+	fprintf(stderr, "app_hugemem_size size: %lu \t(%luMB)\n", g_sdk.app_hugemem_size, g_sdk.app_hugemem_size/MB);
 	fprintf(stderr, "ssd type: %d \t\t(0: kv, 1: lba)\n", g_sdk.ssd_type);
-	fprintf(stderr, "polling interval: %d \t\t(us unit)\n", g_sdk.polling_interval);
+	fprintf(stderr, "submit_retry_interval: %d \t\t(us unit)\n", g_sdk.submit_retry_interval);
 	fprintf(stderr, "nr ssd : %d\n", g_sdk.nr_ssd);
 	for(int i=0;i<g_sdk.nr_ssd;i++){
 		fprintf(stderr, "\tdevice id[%d]: %s\n", i, g_sdk.dev_id[i]);
@@ -146,10 +147,11 @@ void kv_sdk_load_default(kv_sdk *sdk_opt){
 	sdk_opt->use_cache = false;
 	sdk_opt->cache_algorithm = CACHE_ALGORITHM_RADIX;;
 	sdk_opt->cache_reclaim_policy = CACHE_RECLAIM_LRU;
-	sdk_opt->slab_size = 512*1024*1024;
+	sdk_opt->slab_size = 512*1024*1024ULL;
+	sdk_opt->app_hugemem_size = 0;
 	sdk_opt->slab_alloc_policy = SLAB_MM_ALLOC_HUGE;
 	sdk_opt->ssd_type = KV_TYPE_SSD;
-	sdk_opt->polling_interval = 1;
+	sdk_opt->submit_retry_interval = 1;
 	sdk_opt->log_level = 0;
 	strcpy(sdk_opt->log_file, "/tmp/kvsdk.log");
 
@@ -247,9 +249,15 @@ int kv_sdk_load_option(kv_sdk* sdk_opt, char* log_path){ //json parser using SPD
                                 }
 				else if (memcmp(values[i].start, "slab_size", values[i].len) == 0) {
 					i++;
-					uint32_t slab_size = 0;
+					uint64_t slab_size = 0;
 					spdk_json_decode_uint32(&values[i], &slab_size);
-					sdk_opt->slab_size = slab_size * 1024 * 1024;
+					sdk_opt->slab_size = slab_size * MB;
+				}
+				else if (memcmp(values[i].start, "app_hugemem_size", values[i].len) == 0) {
+					i++;
+					uint64_t app_hugemem_size = 0;
+					spdk_json_decode_uint32(&values[i], &app_hugemem_size);
+					sdk_opt->app_hugemem_size = app_hugemem_size * MB;
 				}
 				else if (memcmp(values[i].start, "slab_alloc_policy", values[i].len) == 0) {
 					i++;
@@ -276,12 +284,12 @@ int kv_sdk_load_option(kv_sdk* sdk_opt, char* log_path){ //json parser using SPD
 	                                        goto exit;
 		                        }
 			        }
-				else if (memcmp(values[i].start, "polling_interval", values[i].len) == 0) {
+				else if (memcmp(values[i].start, "submit_retry_interval", values[i].len) == 0) {
 					i++;
-					uint32_t max_interval = 1000;
-					uint32_t polling_interval = 0;
-					spdk_json_decode_uint32(&values[i], &polling_interval);
-					sdk_opt->polling_interval = polling_interval > max_interval ? max_interval : polling_interval;
+					int max_interval = 1000;
+					int submit_retry_interval = 0;
+					spdk_json_decode_int32(&values[i], &submit_retry_interval);
+					sdk_opt->submit_retry_interval = submit_retry_interval > max_interval ? max_interval : submit_retry_interval;
 				}
 				else if (memcmp(values[i].start, "log_level", values[i].len) == 0) {
 					i++;
@@ -338,39 +346,6 @@ exit:
 }
 
 
-int check_device_description(kv_sdk *sdk_opt){
-	int ret = KV_SUCCESS;
-	int n = sdk_opt->nr_ssd;
-
-	for(int i = 0 ; i < n ; i++){
-		if (strlen(sdk_opt->dev_id[i])<=0){
-			ret = KV_ERR_SDK_OPTION_LOAD;
-			break;
-		}
-		if (sdk_opt->dd_options[i].core_mask == 0){
-			ret = KV_ERR_SDK_OPTION_LOAD;
-			break;
-		}
-		if (sdk_opt->dd_options[i].sync_mask < 0){
-			ret = KV_ERR_SDK_OPTION_LOAD;
-			break;
-		}
-		if (sdk_opt->dd_options[i].num_cq_threads <= 0){
-			ret = KV_ERR_SDK_OPTION_LOAD;
-			break;
-		}
-		if (sdk_opt->dd_options[i].cq_thread_mask < 0){
-			ret = KV_ERR_SDK_OPTION_LOAD;
-			break;
-		}
-		if (sdk_opt->dd_options[i].queue_depth <= 0){
-			ret = KV_ERR_SDK_OPTION_LOAD;
-			break;
-		}
-	}
-	return ret;
-}
-
 int kv_sdk_load_option_from_str(kv_sdk *sdk_opt){
 	/**
 	 * NOTE: kv_sdk_load_default(&g_sdk) should be called before this function
@@ -386,7 +361,6 @@ int kv_sdk_load_option_from_str(kv_sdk *sdk_opt){
 	if (sdk_opt->slab_size >0) {
 		g_sdk.slab_size = sdk_opt->slab_size;
 	}
-	//support hugepages memory and kv(not lba) ssd only for now
 	if ((sdk_opt->slab_alloc_policy == SLAB_MM_ALLOC_HUGE) || (sdk_opt->slab_alloc_policy == SLAB_MM_ALLOC_POSIX)) {
 		g_sdk.slab_alloc_policy = SLAB_MM_ALLOC_HUGE;
 	}
@@ -402,9 +376,8 @@ int kv_sdk_load_option_from_str(kv_sdk *sdk_opt){
 	if (sdk_opt->app_hugemem_size) {
 		g_sdk.app_hugemem_size = sdk_opt->app_hugemem_size;
 	}
-
-	if (sdk_opt->polling_interval) {
-		g_sdk.polling_interval = sdk_opt->polling_interval;
+	if (sdk_opt->submit_retry_interval) {
+		g_sdk.submit_retry_interval = sdk_opt->submit_retry_interval;
 	}
 
 	g_sdk.nr_ssd = 0;
@@ -413,7 +386,7 @@ int kv_sdk_load_option_from_str(kv_sdk *sdk_opt){
 			break;
 		}
 		memcpy(g_sdk.dev_id[j], sdk_opt->dev_id[j], 32);
-		if ((sdk_opt->dd_options[j].core_mask) && (sdk_opt->dd_options[j].cq_thread_mask)){
+		if (sdk_opt->dd_options[j].core_mask){
 			g_sdk.dd_options[j].core_mask = sdk_opt->dd_options[j].core_mask;
 			g_sdk.dd_options[j].sync_mask = sdk_opt->dd_options[j].sync_mask;
 			g_sdk.dd_options[j].cq_thread_mask = sdk_opt->dd_options[j].cq_thread_mask;
@@ -440,15 +413,18 @@ int kv_sdk_load_option_from_str(kv_sdk *sdk_opt){
 	return ret;
 }
 
-#define per_device_default (328196u)
-#define queue_default (216u)
-#define per_queue_depth (4432u)
+#define device_memsize (384*KB)
+#define qpair_memsize (1*KB)
+#define tracker_memsize (5*KB)
+#define memsize_margin_ratio (0.2)
 /**
- * returns additional hugepage memory per device needed to initialize D/D
+ * returns total hugepage memory per device needed to initialize SDK in MB (2MB aligned)
  */
-static size_t kv_sdk_calc_additional_mem_needed(void){
+static uint64_t kv_sdk_total_mem_needed(void){
 	uint32_t queue_depth = g_sdk.dd_options[0].queue_depth;
-	size_t driver_hugemem_size = 0;
+	uint64_t driver_hugemem_size = 0;
+	uint64_t total_hugemem_size_MB = 0;
+
 	for(int i = 0; i < g_sdk.nr_ssd; i++) {
 		uint32_t num_used_cores = 0;
 		for(int j = 0; j < MAX_CPU_CORES; j++){
@@ -456,16 +432,19 @@ static size_t kv_sdk_calc_additional_mem_needed(void){
                                         num_used_cores++;
 			}
                 }
-		driver_hugemem_size += (size_t)(per_device_default + MAX(queue_default + (per_queue_depth * queue_depth) - 4*KB, 5*KB) * num_used_cores);
+		driver_hugemem_size += (uint64_t)(device_memsize + MAX(qpair_memsize + (tracker_memsize * queue_depth) - 4*KB, 5*KB) * num_used_cores) + g_sdk.slab_size;
 	}
 
-	return driver_hugemem_size + g_sdk.app_hugemem_size;
+
+	total_hugemem_size_MB = ((uint64_t)(driver_hugemem_size * (1 + memsize_margin_ratio)) + g_sdk.app_hugemem_size) / MB;
+
+	return KV_MEM_ALIGN(total_hugemem_size_MB, HUGEPAGE_SIZE / MB);
 }
 
-int kv_sdk_init(int init_from, void *option){
+int _kv_sdk_init(int init_from, void *option, struct spdk_env_opts *spdk_opts){
 	int ret = KV_SUCCESS;
 	char *json_path;
-	size_t add_hugemem_size;
+	uint64_t total_mem_size_MB;
 	kv_sdk *sdk_opt = NULL;
 
 	pthread_mutex_lock(&g_init_mutex);
@@ -504,8 +483,21 @@ int kv_sdk_init(int init_from, void *option){
 	ret = log_init(g_sdk.log_level,g_sdk.log_file);
 	log_debug(KV_LOG_INFO, "[%s] log_init=%d log_level=%d\n",__FUNCTION__,ret, g_sdk.log_level);
 
-	add_hugemem_size = kv_sdk_calc_additional_mem_needed(); //for user app and driver
-	ret |= kvslab_init(g_sdk.slab_size, g_sdk.slab_alloc_policy, g_sdk.nr_ssd, add_hugemem_size);
+	if (g_sdk.slab_size < MIN_TOTAL_SLAB_SIZE) {
+		fprintf(stderr, "SDK: slab_size(%luMB) should be larger than %lluMB, set slab_size to %lluMB\n", g_sdk.slab_size/MB, MIN_TOTAL_SLAB_SIZE/MB, MIN_TOTAL_SLAB_SIZE/MB);
+		g_sdk.slab_size = MIN_TOTAL_SLAB_SIZE;
+	}
+
+	total_mem_size_MB = kv_sdk_total_mem_needed(); //hugemem size for slab, dd init, and user app
+	if (spdk_opts != NULL) {
+		spdk_opts->dpdk_mem_size = total_mem_size_MB;
+		kv_env_init_with_spdk_opts(spdk_opts);
+	} else { //spdk_opts == NULL
+		kv_env_init(total_mem_size_MB);
+	}
+	fprintf(stderr, "SDK: total hugemem size=%ldMB\n\n", total_mem_size_MB);
+
+	ret |= kvslab_init(g_sdk.slab_size, g_sdk.slab_alloc_policy, g_sdk.nr_ssd);
 
 	log_debug(KV_LOG_INFO, "[%s] slab_init=%d log_level=%d\n",__FUNCTION__,ret, g_sdk.slab_alloc_policy);
 
@@ -533,6 +525,14 @@ int kv_sdk_init(int init_from, void *option){
 	}
 
 	return (ret == KV_SUCCESS) ? (ret) : (KV_ERR_SDK_OPEN);
+}
+
+int kv_sdk_init(int init_from, void *option){
+	return _kv_sdk_init(init_from, option, NULL);
+}
+
+int kv_sdk_init_with_spdk_opts(int init_from, void *option, struct spdk_env_opts *spdk_opts){
+	return _kv_sdk_init(init_from, option, spdk_opts);
 }
 
 int kv_sdk_finalize(){

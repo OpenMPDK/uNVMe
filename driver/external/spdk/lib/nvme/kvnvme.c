@@ -40,7 +40,7 @@ _nvme_kv_cmd_allocate_request(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *q
 		const struct nvme_payload *payload,
 		uint32_t buffer_size, 
 		uint32_t payload_offset, uint32_t md_offset,
-		spdk_nvme_cmd_cb cb_fn, void *cb_arg, uint32_t opc, uint32_t io_flags);
+		spdk_nvme_cmd_cb cb_fn, void *cb_arg, uint32_t opc, uint32_t io_flags, uint32_t keyspace_id);
 
 /*
  * Setup store request
@@ -191,18 +191,11 @@ _nvme_kv_cmd_setup_delete_request(struct spdk_nvme_ns *ns, struct nvme_request *
         struct spdk_nvme_cmd    *cmd;
 
         cmd = &req->cmd;
-	if(option & KV_DELETE_LARGE_VALUE){
-		cmd->cdw10 = buffer_size / 4; // In DWORDs, Note : Only for Stellus Delete
-	}
-	else{
-		cmd->cdw10 = 0;
-	}
+	cmd->cdw10 = 0;
 
-	// 2017.10.25 : for large value append / retrieve
 	// cdw11:
 	// [0:7] key_size -1
 	// [8:15] option
-        //cmd->cdw11 = key_size-1;
 	cmd->cdw11 = ((uint32_t)((option&0xFF)<<8)|((key_size-1)&0xFF));
 
         //
@@ -245,12 +238,11 @@ _nvme_kv_cmd_setup_delete_request(struct spdk_nvme_ns *ns, struct nvme_request *
 	}
 
 	// cdw5:
-	// 2017.10.25 : for large value append / retrieve / delete
 	//    [8:31] The offset of value in bytes
 	// MPTR: CDW4-5
         //    To minimize the modification to original SPDK code, still use mptr here
-	cmd->mptr = (uint64_t)offset;
-	//cmd->mptr= ((uint64_t)((option&0xFF)));
+	cmd->mptr = (uint64_t)0;
+	//cmd->mptr = (uint64_t)offset;
 }
 
 
@@ -258,27 +250,63 @@ _nvme_kv_cmd_setup_delete_request(struct spdk_nvme_ns *ns, struct nvme_request *
  */
 static void    
 _nvme_kv_cmd_setup_exist_request(struct spdk_nvme_ns *ns, struct nvme_request *req,
-                           uint32_t key_size,
-			   uint32_t key_number,
-			   void* buffer,
-                           uint32_t buffer_size,
+                           uint32_t key_size, 
                            uint32_t io_flags, uint32_t option)
 {
         struct spdk_nvme_cmd    *cmd;
 
         cmd = &req->cmd;
-        cmd->cdw14 = key_size-1;
-	cmd->cdw13 = key_number-1;
-	//prp2 stores buffer
-	cmd->dptr.prp.prp2=(uint64_t)buffer;
-        cmd->cdw10 = buffer_size / 4;
+	cmd->cdw10 = 0;
+
+	// cdw11:
+	// [0:7] key_size -1
+	// [8:15] option
+	cmd->cdw11 = ((uint32_t)((option&0xFF)<<8)|((key_size-1)&0xFF));
+
+        //
+        // Filling key value into cdw10-13 in case key size is small than 16.
+        // If md is set, lower layer (nvme_pcie_qpair_build_contig_request())
+        // will prepare PRP and fill into (cdw10-11).
+        //
+        if (key_size <= KV_MAX_EMBED_KEY_SIZE) {
+                memcpy((uint8_t*)&cmd->cdw12, req->payload.md + req->md_offset, key_size);
+                req->payload.md = NULL;
+        }
+	else{
+		//configure key prp1
+		void* key_prp1_vaddr = req->payload.md + req->md_offset;
+		uint64_t key_prp1_paddr = spdk_vtophys(key_prp1_vaddr);
+		if(key_prp1_paddr == SPDK_VTOPHYS_ERROR) {
+			SPDK_ERRLOG("invalid key prp1_vaddr=%016llx\n", (long long unsigned int)key_prp1_vaddr);
+			return;
+		}
+		memcpy((uint8_t*)&cmd->cdw12, (void*)key_prp1_paddr, 8);
+		cmd->cdw12 = key_prp1_paddr;
+		cmd->cdw13 = key_prp1_paddr>>32;
+		//SPDK_NOTICELOG("key_prp1_vaddr=%016llx paddr=%016llx\n", key_prp1_vaddr, key_prp1_paddr);
+
+		//configure key prp2
+		uint32_t unaligned = (uint64_t)key_prp1_vaddr & (PAGE_SIZE -1);
+		//SPDK_NOTICELOG("key_size=%d unaligned = %d remained= %d\n",key_size, unaligned, PAGE_SIZE - unaligned);
+		if(key_size > PAGE_SIZE - unaligned){
+			void* key_prp2_vaddr = key_prp1_vaddr + PAGE_SIZE - unaligned;
+			uint64_t key_prp2_paddr = spdk_vtophys(key_prp2_vaddr);
+			if(key_prp2_paddr == SPDK_VTOPHYS_ERROR) {
+				SPDK_ERRLOG("invalid key prp2_vaddr=%016llx\n", (long long unsigned int)key_prp2_vaddr);
+				return;
+			}
+			cmd->cdw14 = key_prp2_paddr;
+			cmd->cdw15 = key_prp2_paddr>>32;
+			//SPDK_NOTICELOG("key_prp2_vaddr=%016llx paddr=%016llx\n", key_prp2_vaddr, key_prp2_paddr);
+		}
+		req->payload.md = NULL;
+	}
 
 	// cdw5:
-	//    [8:31] Reserved
-	//    [0:7]  Exist Options
+	//    [8:31] The offset of value in bytes
 	// MPTR: CDW4-5
         //    To minimize the modification to original SPDK code, still use mptr here
-	cmd->mptr= ((uint64_t)((option&0xFF)));
+	cmd->mptr = (uint64_t)0;
 }
 
 /*
@@ -369,7 +397,7 @@ static struct nvme_request *
 _nvme_kv_cmd_allocate_request(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair,
 		const struct nvme_payload *payload,
 		uint32_t buffer_size, uint32_t payload_offset, uint32_t md_offset,
-		spdk_nvme_cmd_cb cb_fn, void *cb_arg, uint32_t opc, uint32_t io_flags)
+		spdk_nvme_cmd_cb cb_fn, void *cb_arg, uint32_t opc, uint32_t io_flags, uint32_t keyspace_id)
 {
 	struct nvme_request	*req;
         struct spdk_nvme_cmd    *cmd;
@@ -386,7 +414,7 @@ _nvme_kv_cmd_allocate_request(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *q
 
         cmd = &req->cmd;
         cmd->opc = opc;
-        cmd->nsid = ns->id;
+        cmd->nsid = keyspace_id;
 
 	req->payload_offset = payload_offset;
 	req->md_offset = md_offset;
@@ -399,6 +427,7 @@ _nvme_kv_cmd_allocate_request(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *q
  *
  * \param ns NVMe namespace to submit the KV Store I/O
  * \param qpair I/O queue pair to submit the request
+ * \param keyspace_id namespace id of key
  * \param key virtual address pointer to the value
  * \param key_length length (in bytes) of the key
  * \param buffer virtual address pointer to the value
@@ -421,7 +450,7 @@ _nvme_kv_cmd_allocate_request(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *q
  */
 int
 spdk_nvme_kv_cmd_store(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair,
-			      void *key, uint32_t key_length,
+			      uint32_t keyspace_id, void *key, uint32_t key_length,
 			      void *buffer, uint32_t buffer_length,
 			      uint32_t offset,
 			      spdk_nvme_cmd_cb cb_fn, void *cb_arg,
@@ -441,7 +470,7 @@ spdk_nvme_kv_cmd_store(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair,
 
 	req = _nvme_kv_cmd_allocate_request(ns, qpair, &payload, buffer_length,
                              0, 0, cb_fn, cb_arg, (is_store) ? SPDK_NVME_OPC_KV_STORE : SPDK_NVME_OPC_KV_APPEND,
-                             io_flags);
+                             io_flags, keyspace_id);
 
 	if (NULL == req) {
 		return KV_ERR_DD_NO_AVAILABLE_RESOURCE;
@@ -463,6 +492,7 @@ spdk_nvme_kv_cmd_store(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair,
  *
  * \param ns NVMe namespace to submit the KV Retrieve I/O
  * \param qpair I/O queue pair to submit the request
+ * \param keyspace_id namespace id of key
  * \param key virtual address pointer to the value
  * \param key_length length (in bytes) of the key
  * \param buffer virtual address pointer to the value
@@ -484,7 +514,7 @@ spdk_nvme_kv_cmd_store(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair,
  */
 int
 spdk_nvme_kv_cmd_retrieve(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair,
-			      void *key, uint32_t key_length,
+			      uint32_t keyspace_id, void *key, uint32_t key_length,
 			      void *buffer, uint32_t buffer_length,
 			      uint32_t offset,
 			      spdk_nvme_cmd_cb cb_fn, void *cb_arg,
@@ -502,7 +532,7 @@ spdk_nvme_kv_cmd_retrieve(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair
 
 	req = _nvme_kv_cmd_allocate_request(ns, qpair, &payload, buffer_length,
 			      0, 0, cb_fn, cb_arg, SPDK_NVME_OPC_KV_RETRIEVE,
-			      io_flags);
+			      io_flags, keyspace_id);
 	if (NULL == req) {
 		return KV_ERR_DD_NO_AVAILABLE_RESOURCE;
 	}
@@ -523,6 +553,7 @@ spdk_nvme_kv_cmd_retrieve(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair
  *
  * \param ns NVMe namespace to submit the KV DeleteI/O
  * \param qpair I/O queue pair to submit the request
+ * \param keyspace_id namespace id of key
  * \param key virtual address pointer to the value
  * \param key_length length (in bytes) of the key
  * \param offset offset of value (in bytes)
@@ -542,7 +573,7 @@ spdk_nvme_kv_cmd_retrieve(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair
  */
 int
 spdk_nvme_kv_cmd_delete(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair,
-			      void *key, uint32_t key_length, uint32_t buffer_length, uint32_t offset,
+			      uint32_t keyspace_id, void *key, uint32_t key_length, uint32_t buffer_length, uint32_t offset,
 			      spdk_nvme_cmd_cb cb_fn, void *cb_arg,
 		              uint32_t io_flags, uint8_t  option)
 {
@@ -559,7 +590,7 @@ spdk_nvme_kv_cmd_delete(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair,
 	req = _nvme_kv_cmd_allocate_request(ns, qpair, &payload,
 			      0, //Payload length is 0 for delete command
 			      0, 0, cb_fn, cb_arg, SPDK_NVME_OPC_KV_DELETE,
-			      io_flags);
+			      io_flags, keyspace_id);
 
 	if (NULL == req) {
 		return KV_ERR_DD_NO_AVAILABLE_RESOURCE;
@@ -602,8 +633,7 @@ spdk_nvme_kv_cmd_delete(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair,
  */
 int
 spdk_nvme_kv_cmd_exist(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair,
-			      void *keys, uint32_t key_number, uint32_t key_length,
-			      void *buffer, uint32_t buffer_length,
+			      uint32_t keyspace_id, void *key, uint32_t key_length,
 			      spdk_nvme_cmd_cb cb_fn, void *cb_arg,
 		              uint32_t io_flags, uint8_t  option)
 {
@@ -614,20 +644,20 @@ spdk_nvme_kv_cmd_exist(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair,
 	if (key_length > KV_MAX_KEY_SIZE) return KV_ERR_DD_INVALID_PARAM;
 
 	payload.type = NVME_PAYLOAD_TYPE_CONTIG;
-	payload.u.contig = keys;
-	payload.md = NULL; //Bugbug: how to determine the length of keys buffer in case of variable lengths
+	payload.u.contig = NULL;
+	payload.md = key;
 
-	req = _nvme_kv_cmd_allocate_request(ns, qpair, &payload, buffer_length,
+	req = _nvme_kv_cmd_allocate_request(ns, qpair, &payload, 
+				0, //payload length is 0 for exist command
 			      0, 0, cb_fn, cb_arg, SPDK_NVME_OPC_KV_EXIST,
-			      io_flags);
+			      io_flags, keyspace_id);
 
 	if (NULL == req) {
 		return KV_ERR_DD_NO_AVAILABLE_RESOURCE;
 	}
 
 	_nvme_kv_cmd_setup_exist_request(ns, req,
-			   key_length, key_number, buffer, buffer_length,
-                           io_flags, option);
+			   key_length, io_flags, option);
 
 	ret = nvme_qpair_submit_request(qpair, req);
 	if(ret != KV_SUCCESS){
@@ -677,7 +707,7 @@ spdk_nvme_kv_cmd_iterate_read(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *q
 
 	req = _nvme_kv_cmd_allocate_request(ns, qpair, &payload, buffer_length,
 			      0, 0, cb_fn, cb_arg, SPDK_NVME_OPC_KV_ITERATE_READ,
-			      io_flags);
+			      io_flags, 0);
 
 	if (NULL == req) {
 		return KV_ERR_DD_NO_AVAILABLE_RESOURCE;
@@ -700,6 +730,7 @@ spdk_nvme_kv_cmd_iterate_read(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *q
  *
  * \param ns NVMe namespace to submit the KV Iterate I/O
  * \param qpair I/O queue pair to submit the request
+ * \param keyspace_id keyspace_id (KV_KEYSPACE_IODATA=0, or KV_KEYSPACE_METADATA=1)
  * \param bitmask bitmask of matching key set
  * \param prefix prefix of matching key set
  * \param cb_fn callback function to invoke when the I/O is completed
@@ -718,7 +749,7 @@ spdk_nvme_kv_cmd_iterate_read(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *q
  */
 int
 spdk_nvme_kv_cmd_iterate_open(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *qpair,
-			      uint32_t bitmask, uint32_t prefix,
+			      uint8_t keyspace_id, uint32_t bitmask, uint32_t prefix,
 			      spdk_nvme_cmd_cb cb_fn, void *cb_arg,
 		              uint32_t io_flags, uint8_t  option)
 {
@@ -732,7 +763,7 @@ spdk_nvme_kv_cmd_iterate_open(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *q
 
 	req = _nvme_kv_cmd_allocate_request(ns, qpair, &payload, 0,
 			      0, 0, cb_fn, cb_arg, SPDK_NVME_OPC_KV_ITERATE_REQUEST,
-			      io_flags);
+			      io_flags, keyspace_id);
 
 	if (NULL == req) {
 		return KV_ERR_DD_NO_AVAILABLE_RESOURCE;
@@ -789,7 +820,7 @@ spdk_nvme_kv_cmd_iterate_close(struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *
 
 	req = _nvme_kv_cmd_allocate_request(ns, qpair, &payload, 0,
 			      0, 0, cb_fn, cb_arg, SPDK_NVME_OPC_KV_ITERATE_REQUEST,
-			      io_flags);
+			      io_flags, 0);
 
 	if (NULL == req) {
 		return KV_ERR_DD_NO_AVAILABLE_RESOURCE;
@@ -863,4 +894,3 @@ spdk_dump_nvme_cmd (const struct spdk_nvme_cmd *cmd) {
 	printf("DWORD12-15: %s\n",buf);
 }
 */
-

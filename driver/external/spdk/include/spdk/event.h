@@ -88,6 +88,8 @@ struct spdk_app_opts {
 	 * specified in microseconds.
 	 */
 	uint64_t		max_delay_us;
+	int                     init_from;
+	char                    *options;
 };
 
 /**

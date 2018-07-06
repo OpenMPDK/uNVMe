@@ -1,7 +1,8 @@
 [global]
 ioengine=./unvme2_fio_plugin
+json_path=./unvme2_config_multi.json
 thread=1
-group_reporting=1
+group_reporting=0
 direct=1
 verify=0
 time_based=0
@@ -11,7 +12,16 @@ offset_increment=10G
 rw=write
 iodepth=128
 bs=4k
-filename=unvme2_config.json   #for multi-device test, please refer unvme2.0 evaluation guide
 
-[test]
-numjobs=4
+[test0]
+filename=0000.01.00.0
+numjobs=1
+
+[test1]
+filename=0000.02.00.0
+numjobs=1
+
+# e.g.  job : device = 1 : 2
+#[test2]
+#filename=0000.01.00.0:0000.02.00.0 
+#numjobs=1

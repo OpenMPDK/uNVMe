@@ -83,7 +83,7 @@ int cache_perf(void){
                 kv[i] = (kv_pair*)malloc(sizeof(kv_pair));
 		fail_unless(kv[i] != NULL);
 
-		kv[i]->key.key = malloc(key_length);
+		kv[i]->key.key = malloc(key_length + 1);
 		fail_unless(kv[i]->key.key != NULL);
 		kv[i]->key.length = key_length;
 

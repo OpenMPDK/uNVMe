@@ -26,7 +26,7 @@ MASK = 0xFF
 PCI_ADDRESS = "0000:02:00.0"
 
 # Number of keys to transfer
-NUM_KEYS = 100000
+NUM_KEYS = 10000
 
 # Type of the test to run
 WORKLOAD = WRITE_READ_DELETE

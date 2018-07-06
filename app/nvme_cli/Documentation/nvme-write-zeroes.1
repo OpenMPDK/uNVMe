@@ -1,0 +1,149 @@
+'\" t
+.\"     Title: nvme-zeroes
+.\"    Author: [FIXME: author] [see http://docbook.sf.net/el/author]
+.\" Generator: DocBook XSL Stylesheets v1.78.1 <http://docbook.sf.net/>
+.\"      Date: 06/28/2017
+.\"    Manual: NVMe Manual
+.\"    Source: NVMe
+.\"  Language: English
+.\"
+.TH "NVME\-ZEROES" "1" "06/28/2017" "NVMe" "NVMe Manual"
+.\" -----------------------------------------------------------------
+.\" * Define some portability stuff
+.\" -----------------------------------------------------------------
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.\" http://bugs.debian.org/507673
+.\" http://lists.gnu.org/archive/html/groff/2009-02/msg00013.html
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.ie \n(.g .ds Aq \(aq
+.el       .ds Aq '
+.\" -----------------------------------------------------------------
+.\" * set default formatting
+.\" -----------------------------------------------------------------
+.\" disable hyphenation
+.nh
+.\" disable justification (adjust text to left margin only)
+.ad l
+.\" -----------------------------------------------------------------
+.\" * MAIN CONTENT STARTS HERE *
+.\" -----------------------------------------------------------------
+.SH "NAME"
+nvme-write-zeroes \- Send an NVMe write zeroes command, return results
+.SH "SYNOPSIS"
+.sp
+.nf
+\fInvme\-write\-zeroes\fR <device> [\-\-start\-block=<slba> | \-s <slba>]
+                        [\-\-block\-count=<nlb> | \-c <nlb>]
+                        [\-\-ref\-tag=<reftag> | \-r <reftag>]
+                        [\-\-prinfo=<prinfo> | \-p <prinfo>]
+                        [\-\-app\-tag\-mask=<appmask> | \-m <appmask>]
+                        [\-\-app\-tag=<apptag> | \-a <apptag>]
+                        [\-\-limited\-retry | \-l]
+                        [\-\-force\-unit\-access | \-f]
+                        [\-\-namespace\-id=<nsid> | \-n <nsid>]
+.fi
+.SH "DESCRIPTION"
+.sp
+The Write Zeroes command is used to set a range of logical blocks to 0\&.
+.SH "OPTIONS"
+.PP
+\-\-start\-block=<slba>, \-s <slba>
+.RS 4
+Start block\&.
+.RE
+.PP
+\-\-block\-count=<nlb>, \-c <nlb>
+.RS 4
+Number of logical blocks to write zeroes\&.
+.RE
+.PP
+\-\-prinfo=<prinfo>, \-p <prinfo>
+.RS 4
+Protection Information field defintion\&.
+.TS
+allbox tab(:);
+lt lt
+lt lt
+lt lt
+lt lt
+lt lt
+lt lt.
+T{
+Bit
+T}:T{
+Description
+T}
+T{
+3
+T}:T{
+PRACT: Protection Information Action\&. When set to 1, PI is stripped/inserted on read/write when the block format\(cqs metadata size is 8\&. When set to 0, metadata is passes\&.
+T}
+T{
+2:0
+T}:T{
+PRCHK: Protection Information Check:
+T}
+T{
+2
+T}:T{
+Set to 1 enables checking the guard tag
+T}
+T{
+1
+T}:T{
+Set to 1 enables checking the application tag
+T}
+T{
+0
+T}:T{
+Set to 1 enables checking the reference tag
+T}
+.TE
+.sp 1
+.RE
+.PP
+\-\-ref\-tag=<reftag>, \-r <reftag>
+.RS 4
+Optional reftag when used with protection information\&.
+.RE
+.PP
+\-\-app\-tag\-mask=<appmask>, \-m <appmask>
+.RS 4
+Optional application tag mask when used with protection information\&.
+.RE
+.PP
+\-\-app\-tag=<apptag>, \-a <apptag>
+.RS 4
+Optional application tag when used with protection information\&.
+.RE
+.PP
+\-\-limited\-retry, \-l
+.RS 4
+Sets the limited retry flag\&.
+.RE
+.PP
+\-\-force\-unit\-access, \-f
+.RS 4
+Set the force\-unit access flag\&.
+.RE
+.PP
+\-\-namespace\-id=<nsid>, \-n <nsid>
+.RS 4
+Namespace ID use in the command\&.
+.RE
+.sp
+EXAMPLES EXAMPLES
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+No examples yet\&.
+
+NVME
+.fi
+.if n \{\
+.RE
+.\}
+.sp
+Part of the nvme\-user suite

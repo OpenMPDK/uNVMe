@@ -67,8 +67,9 @@ typedef int kvsl_rstatus_t; /* return type */
 #define KVSLAB_SLAB_MEMORY      (64 * MB)
 #define KVSLAB_SLABCLASS_MAX_IDS       UCHAR_MAX
 
-#define HUGEPAGE_SIZE (2*1024*1024)
-#define MAX_SLAB_SIZE HUGEPAGE_SIZE
+#define HUGEPAGE_SIZE (2ULL*1024*1024)
+#define MAX_NUM_SLAB_CLASS (8)
+#define MIN_TOTAL_SLAB_SIZE (HUGEPAGE_SIZE*MAX_NUM_SLAB_CLASS)
 
 struct kvsl_settings {
 	double factor;				/* item chunk size growth factor */
@@ -104,7 +105,7 @@ struct kvsl_item {
 #define KVSLAB_ITEM_HDR_SIZE   offsetof(struct kvsl_item, end)
 #define KVSLAB_ITEM_PAYLOAD_SIZE       32
 #define KVSLAB_ITEM_CHUNK_SIZE         \
-    KVSLAB_ALIGN(KVSLAB_ITEM_HDR_SIZE + KVSLAB_ITEM_PAYLOAD_SIZE, KVSLAB_ALIGNMENT)
+    KV_MEM_ALIGN(KVSLAB_ITEM_HDR_SIZE + KVSLAB_ITEM_PAYLOAD_SIZE, KVSLAB_ALIGNMENT)
 
 
 static inline uint8_t * kvsl_item_data(struct kvsl_item *it){
@@ -167,7 +168,7 @@ struct kvsl_slabclass {
 };
 
 
-kvsl_rstatus_t kvsl_slab_init(size_t add_mem_size);
+kvsl_rstatus_t kvsl_slab_init(void);
 kvsl_rstatus_t kvsl_slab_deinit(void);
 
 void print_slab_class_info(bool print_detail);

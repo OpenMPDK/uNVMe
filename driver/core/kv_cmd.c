@@ -78,7 +78,6 @@ static void _kv_async_io_complete(void *arg, const struct spdk_nvme_cpl *complet
         LEAVE();
 }
 
-
 static void _kv_iterate_read_async_cb(void *arg, const struct spdk_nvme_cpl *completion) {
         kv_iterate *it = NULL;
         unsigned int status = 0, result = 0;
@@ -109,7 +108,7 @@ static void _kv_iterate_read_async_cb(void *arg, const struct spdk_nvme_cpl *com
         LEAVE();
 }
 
-int _kv_nvme_store(kv_nvme_t *nvme, const kv_pair *kv, int core_id, uint8_t is_store) {
+int _kv_nvme_store(kv_nvme_t *nvme, const kv_pair *kv, int qid, uint8_t is_store) {
         int ret = KV_ERR_DD_INVALID_PARAM;
         struct spdk_nvme_qpair *qpair = NULL;
         nvme_cmd_sequence_t io_sequence = {0};
@@ -122,7 +121,7 @@ int _kv_nvme_store(kv_nvme_t *nvme, const kv_pair *kv, int core_id, uint8_t is_s
                 return ret;
         }
 
-        qpair = nvme->qpairs[core_id];
+        qpair = nvme->qpairs[qid];
 
         if(!qpair) {
                 KVNVME_ERR("No Matching I/O Queue found for the Passed CPU Core ID");
@@ -130,11 +129,11 @@ int _kv_nvme_store(kv_nvme_t *nvme, const kv_pair *kv, int core_id, uint8_t is_s
                 return ret;
         }
 
-        pthread_spin_lock(&qpair->q_lock);
-        ret = spdk_nvme_kv_cmd_store(nvme->ns, qpair, kv->key.key, kv->key.length, kv->value.value, kv->value.length, kv->value.offset, _kv_io_complete, &io_sequence, 0, kv->param.io_option.store_option, is_store);
+        pthread_spin_lock(&qpair->sq_lock);
+        ret = spdk_nvme_kv_cmd_store(nvme->ns, qpair, kv->keyspace_id, kv->key.key, kv->key.length, kv->value.value, kv->value.length, kv->value.offset, _kv_io_complete, &io_sequence, 0, kv->param.io_option.store_option, is_store);
 
         if(ret) {
-                pthread_spin_unlock(&qpair->q_lock);
+                pthread_spin_unlock(&qpair->sq_lock);
                 KVNVME_ERR("Error in Performing Store on the KV Type SSD");
                 LEAVE();
                 return ret;
@@ -143,14 +142,14 @@ int _kv_nvme_store(kv_nvme_t *nvme, const kv_pair *kv, int core_id, uint8_t is_s
         while(!io_sequence.is_completed) {
                 spdk_nvme_qpair_process_completions(qpair, 0);
         }
-        pthread_spin_unlock(&qpair->q_lock);
+        pthread_spin_unlock(&qpair->sq_lock);
 
         KVNVME_DEBUG("Result of the I/O: %d, Status of the I/O: %d", io_sequence.result, io_sequence.status);
         LEAVE();
         return io_sequence.status;
 }
 
-int _kv_nvme_store_async(kv_nvme_t *nvme, const kv_pair *kv, int core_id) {
+int _kv_nvme_store_async(kv_nvme_t *nvme, const kv_pair *kv, int qid) {
         int ret = KV_ERR_DD_INVALID_PARAM;
         struct spdk_nvme_qpair *qpair = NULL;
 
@@ -162,7 +161,7 @@ int _kv_nvme_store_async(kv_nvme_t *nvme, const kv_pair *kv, int core_id) {
                 return ret;
         }
 
-        qpair = nvme->qpairs[core_id];
+        qpair = nvme->qpairs[qid];
 
         if(!qpair) {
                 KVNVME_ERR("No Matching I/O Queue found for the Passed CPU Core ID");
@@ -170,22 +169,17 @@ int _kv_nvme_store_async(kv_nvme_t *nvme, const kv_pair *kv, int core_id) {
                 return ret;
         }
 
-        pthread_spin_lock(&qpair->q_lock);
-        ret = spdk_nvme_kv_cmd_store(nvme->ns, qpair, kv->key.key, kv->key.length, kv->value.value, kv->value.length, kv->value.offset, _kv_async_io_complete, (void *)kv, 0, kv->param.io_option.store_option, true);
-
+        pthread_spin_lock(&qpair->sq_lock);
+        ret = spdk_nvme_kv_cmd_store(nvme->ns, qpair, kv->keyspace_id, kv->key.key, kv->key.length, kv->value.value, kv->value.length, kv->value.offset, _kv_async_io_complete, (void *)kv, 0, kv->param.io_option.store_option, true);
         if(ret) {
-                pthread_spin_unlock(&qpair->q_lock);
 //              KVNVME_ERR("Error in Performing Store on the KV Type SSD");
-                LEAVE();
-                return ret;
         }
-
-        pthread_spin_unlock(&qpair->q_lock);
+        pthread_spin_unlock(&qpair->sq_lock);
         LEAVE();
         return ret;
 }
 
-int _kv_nvme_retrieve(kv_nvme_t *nvme, kv_pair *kv, int core_id) {
+int _kv_nvme_retrieve(kv_nvme_t *nvme, kv_pair *kv, int qid) {
         int ret = KV_ERR_DD_INVALID_PARAM;
         struct spdk_nvme_qpair *qpair = NULL;
         nvme_cmd_sequence_t io_sequence = {0};
@@ -198,7 +192,7 @@ int _kv_nvme_retrieve(kv_nvme_t *nvme, kv_pair *kv, int core_id) {
                 return ret;
         }
 
-        qpair = nvme->qpairs[core_id];
+        qpair = nvme->qpairs[qid];
 
         if(!qpair) {
                 KVNVME_ERR("No Matching I/O Queue found for the Passed CPU Core ID");
@@ -207,15 +201,17 @@ int _kv_nvme_retrieve(kv_nvme_t *nvme, kv_pair *kv, int core_id) {
         }
 
         //calling retrieve as get_value_size
-        pthread_spin_lock(&qpair->q_lock);
+        pthread_spin_lock(&qpair->sq_lock);
+	/*
         if(kv->param.io_option.retrieve_option & KV_RETRIEVE_VALUE_SIZE){
                 kv->value.length = 0;
         }
+	*/
 
-        ret = spdk_nvme_kv_cmd_retrieve(nvme->ns, qpair, kv->key.key, kv->key.length, kv->value.value, kv->value.length, kv->value.offset, _kv_io_complete, &io_sequence, 0, kv->param.io_option.retrieve_option);
+        ret = spdk_nvme_kv_cmd_retrieve(nvme->ns, qpair, kv->keyspace_id, kv->key.key, kv->key.length, kv->value.value, kv->value.length, kv->value.offset, _kv_io_complete, &io_sequence, 0, kv->param.io_option.retrieve_option);
 
         if(ret) {
-                pthread_spin_unlock(&qpair->q_lock);
+                pthread_spin_unlock(&qpair->sq_lock);
                 KVNVME_ERR("Error in Performing Retrieve on the KV Type SSD");
                 LEAVE();
                 return ret;
@@ -224,7 +220,7 @@ int _kv_nvme_retrieve(kv_nvme_t *nvme, kv_pair *kv, int core_id) {
         while(!io_sequence.is_completed) {
                 spdk_nvme_qpair_process_completions(qpair, 0);
         }
-        pthread_spin_unlock(&qpair->q_lock);
+        pthread_spin_unlock(&qpair->sq_lock);
 
         KVNVME_DEBUG("Result of the I/O: %d, Status of the I/O: %d", io_sequence.result, io_sequence.status);
 
@@ -234,7 +230,7 @@ int _kv_nvme_retrieve(kv_nvme_t *nvme, kv_pair *kv, int core_id) {
         return io_sequence.status;
 }
 
-int _kv_nvme_retrieve_async(kv_nvme_t *nvme, kv_pair *kv, int core_id) {
+int _kv_nvme_retrieve_async(kv_nvme_t *nvme, kv_pair *kv, int qid) {
         int ret = KV_ERR_DD_INVALID_PARAM;
         struct spdk_nvme_qpair *qpair = NULL;
 
@@ -246,7 +242,7 @@ int _kv_nvme_retrieve_async(kv_nvme_t *nvme, kv_pair *kv, int core_id) {
                 return ret;
         }
 
-        qpair = nvme->qpairs[core_id];
+        qpair = nvme->qpairs[qid];
 
         if(!qpair) {
                 KVNVME_ERR("No Matching I/O Queue found for the Passed CPU Core ID");
@@ -254,22 +250,18 @@ int _kv_nvme_retrieve_async(kv_nvme_t *nvme, kv_pair *kv, int core_id) {
                 return ret;
         }
 
-        pthread_spin_lock(&qpair->q_lock);
-        ret = spdk_nvme_kv_cmd_retrieve(nvme->ns, qpair, kv->key.key, kv->key.length, kv->value.value, kv->value.length, kv->value.offset, _kv_async_io_complete, (void *)kv, 0, kv->param.io_option.retrieve_option);
+        pthread_spin_lock(&qpair->sq_lock);
+        ret = spdk_nvme_kv_cmd_retrieve(nvme->ns, qpair, kv->keyspace_id, kv->key.key, kv->key.length, kv->value.value, kv->value.length, kv->value.offset, _kv_async_io_complete, (void *)kv, 0, kv->param.io_option.retrieve_option);
 
         if(ret) {
-                pthread_spin_unlock(&qpair->q_lock);
 //              KVNVME_ERR("Error in Performing Retrieve on the KV Type SSD");
-                LEAVE();
-                return ret;
         }
-        pthread_spin_unlock(&qpair->q_lock);
-
+        pthread_spin_unlock(&qpair->sq_lock);
         LEAVE();
         return ret;
 }
 
-int _kv_nvme_delete(kv_nvme_t *nvme, const kv_pair *kv, int core_id) {
+int _kv_nvme_delete(kv_nvme_t *nvme, const kv_pair *kv, int qid) {
         int ret = KV_ERR_DD_INVALID_PARAM;
         struct spdk_nvme_qpair *qpair = NULL;
         nvme_cmd_sequence_t io_sequence = {0};
@@ -282,7 +274,7 @@ int _kv_nvme_delete(kv_nvme_t *nvme, const kv_pair *kv, int core_id) {
                 return ret;
         }
 
-        qpair = nvme->qpairs[core_id];
+        qpair = nvme->qpairs[qid];
 
         if(!qpair) {
                 KVNVME_ERR("No Matching I/O Queue found for the Passed CPU Core ID");
@@ -290,11 +282,11 @@ int _kv_nvme_delete(kv_nvme_t *nvme, const kv_pair *kv, int core_id) {
                 return ret;
         }
 
-        pthread_spin_lock(&qpair->q_lock);
-        ret = spdk_nvme_kv_cmd_delete(nvme->ns, qpair, kv->key.key, kv->key.length, kv->value.length, kv->value.offset, _kv_io_complete, &io_sequence, 0, kv->param.io_option.delete_option);
+        pthread_spin_lock(&qpair->sq_lock);
+        ret = spdk_nvme_kv_cmd_delete(nvme->ns, qpair, kv->keyspace_id, kv->key.key, kv->key.length, kv->value.length, kv->value.offset, _kv_io_complete, &io_sequence, 0, kv->param.io_option.delete_option);
 
         if(ret) {
-                pthread_spin_unlock(&qpair->q_lock);
+                pthread_spin_unlock(&qpair->sq_lock);
                 KVNVME_ERR("Error in Performing Key Delete on the KV Type SSD");
                 LEAVE();
                 return ret;
@@ -303,14 +295,14 @@ int _kv_nvme_delete(kv_nvme_t *nvme, const kv_pair *kv, int core_id) {
         while(!io_sequence.is_completed) {
                 spdk_nvme_qpair_process_completions(qpair, 0);
         }
-        pthread_spin_unlock(&qpair->q_lock);
+        pthread_spin_unlock(&qpair->sq_lock);
 
         KVNVME_DEBUG("Result of the I/O: %d, Status of the I/O: %d", io_sequence.result, io_sequence.status);
         LEAVE();
         return io_sequence.status;
 }
 
-int _kv_nvme_delete_async(kv_nvme_t *nvme, const kv_pair *kv, int core_id) {
+int _kv_nvme_delete_async(kv_nvme_t *nvme, const kv_pair *kv, int qid) {
         int ret = KV_ERR_DD_INVALID_PARAM;
         struct spdk_nvme_qpair *qpair = NULL;
 
@@ -322,7 +314,7 @@ int _kv_nvme_delete_async(kv_nvme_t *nvme, const kv_pair *kv, int core_id) {
                 return ret;
         }
 
-        qpair = nvme->qpairs[core_id];
+        qpair = nvme->qpairs[qid];
 
         if(!qpair) {
                 KVNVME_ERR("No Matching I/O Queue found for the Passed CPU Core ID");
@@ -330,22 +322,18 @@ int _kv_nvme_delete_async(kv_nvme_t *nvme, const kv_pair *kv, int core_id) {
                 return ret;
         }
 
-        pthread_spin_lock(&qpair->q_lock);
-        ret = spdk_nvme_kv_cmd_delete(nvme->ns, qpair, kv->key.key, kv->key.length, kv->value.length, kv->value.offset, _kv_async_io_complete, (void *)kv, 0, kv->param.io_option.delete_option);
+        pthread_spin_lock(&qpair->sq_lock);
+        ret = spdk_nvme_kv_cmd_delete(nvme->ns, qpair, kv->keyspace_id, kv->key.key, kv->key.length, kv->value.length, kv->value.offset, _kv_async_io_complete, (void *)kv, 0, kv->param.io_option.delete_option);
 
         if(ret) {
-                pthread_spin_unlock(&qpair->q_lock);
                 //KVNVME_ERR("Error in Performing Key Delete on the KV Type SSD: ret=%d\n",ret);
-                LEAVE();
-                return ret;
         }
-        pthread_spin_unlock(&qpair->q_lock);
-
+        pthread_spin_unlock(&qpair->sq_lock);
         LEAVE();
         return ret;
 }
 
-int _kv_nvme_format(kv_nvme_t *nvme) {
+int _kv_nvme_format(kv_nvme_t *nvme, int ses) {
         int ret = KV_ERR_DD_INVALID_PARAM;
         uint32_t ns_id = 0;
         struct spdk_nvme_format format = {};
@@ -353,12 +341,18 @@ int _kv_nvme_format(kv_nvme_t *nvme) {
         ENTER();
 
         // Assuming the Device's default format type is 0 (Data size 512, Metadata size 0)
-        format.lbaf     = 0;
-        format.ms       = 0;
-        format.pi       = 0;
-        format.pil      = 0;
-        // Userdata Erase
-        format.ses      = 1;
+        format.lbaf = 0;
+        format.ms = 0;
+        format.pi = 0;
+        format.pil = 0;
+
+        // ses = 0, map erase ses = 1, userdata Erase
+	if(ses != 0 && ses != 1){
+		KVNVME_ERR("invalid ses value(%d). changed ses=1", ses);
+		ses = 1;
+	}
+
+        format.ses = ses;
 
         ns_id = spdk_nvme_ns_get_id(nvme->ns);
 
@@ -368,6 +362,7 @@ int _kv_nvme_format(kv_nvme_t *nvme) {
         }
 
         KVNVME_INFO("Namespace ID: %d", ns_id);
+        KVNVME_INFO("Ses : %d", ses);
 
         ret = spdk_nvme_ctrlr_format(nvme->ctrlr, ns_id, &format);
 
@@ -408,20 +403,20 @@ uint64_t _kv_nvme_get_used_size(kv_nvme_t* nvme) {
         return used_size;
 }
 
-int _kv_nvme_exist(kv_nvme_t* nvme, const kv_key_list* key_list, kv_value* result, int core_id) {
+int _kv_nvme_exist(kv_nvme_t* nvme, const kv_pair* kv, int qid) {
         int ret = KV_ERR_DD_INVALID_PARAM;
         struct spdk_nvme_qpair *qpair = NULL;
         nvme_cmd_sequence_t io_sequence = {0};
 
         ENTER();
 
-        if(!key_list || !result) {
+        if(!kv || !kv->key.key) {
                 KVNVME_ERR("Invalid Parameters passed");
                 LEAVE();
                 return ret;
         }
 
-        qpair = nvme->qpairs[core_id];
+        qpair = nvme->qpairs[qid];
 
         if(!qpair) {
                 KVNVME_ERR("No Matching I/O Queue found for the Passed CPU Core ID");
@@ -429,28 +424,59 @@ int _kv_nvme_exist(kv_nvme_t* nvme, const kv_key_list* key_list, kv_value* resul
                 return ret;
         }
 
-        pthread_spin_lock(&qpair->q_lock);
-        ret = spdk_nvme_kv_cmd_exist(nvme->ns, qpair, key_list->buffer, key_list->key_number, key_list->key_length, result->value, result->length, _kv_io_complete, &io_sequence, 0, key_list->option);
+        pthread_spin_lock(&qpair->sq_lock);
+        ret = spdk_nvme_kv_cmd_exist(nvme->ns, qpair, kv->keyspace_id, kv->key.key, kv->key.length, _kv_io_complete, &io_sequence, 0, kv->param.io_option.exist_option);
         if(ret) {
-                pthread_spin_unlock(&qpair->q_lock);
+                pthread_spin_unlock(&qpair->sq_lock);
                 KVNVME_ERR("Error in Performing Key Exist on the KV Type SSD");
                 LEAVE();
                 return ret;
         }
-        pthread_spin_unlock(&qpair->q_lock);
+        pthread_spin_unlock(&qpair->sq_lock);
 
         while(!io_sequence.is_completed) {
                 spdk_nvme_qpair_process_completions(qpair, 0);
         }
 
-        KVNVME_ERR("Result of the I/O: %d, Status of the I/O: %d", io_sequence.result, io_sequence.status);
+        //KVNVME_ERR("Result of the I/O: %d, Status of the I/O: %d", io_sequence.result, io_sequence.status);
 
         LEAVE();
         return io_sequence.status;
 }
 
 
-uint32_t _kv_nvme_iterate_open(kv_nvme_t *nvme, const uint32_t bitmask, const uint32_t prefix, const uint8_t iterate_type, int core_id){
+int _kv_nvme_exist_async(kv_nvme_t* nvme, const kv_pair* kv, int qid){
+	int ret = KV_ERR_DD_INVALID_PARAM;
+	struct spdk_nvme_qpair *qpair = NULL;
+
+	ENTER();
+
+	if(!kv || !kv->key.key) {
+                KVNVME_ERR("Invalid Parameters passed");
+                LEAVE();
+                return ret;
+	}
+
+        qpair = nvme->qpairs[qid];
+
+        if(!qpair) {
+                KVNVME_ERR("No Matching I/O Queue found for the Passed CPU Core ID");
+                LEAVE();
+                return ret;
+        }
+
+        pthread_spin_lock(&qpair->sq_lock);
+        ret = spdk_nvme_kv_cmd_exist(nvme->ns, qpair, kv->keyspace_id, kv->key.key, kv->key.length, _kv_async_io_complete, (void*)kv, 0, kv->param.io_option.exist_option);
+        if(ret) {
+                //KVNVME_ERR("Error in Performing Key Exist on the KV Type SSD");
+        }
+        pthread_spin_unlock(&qpair->sq_lock);
+	LEAVE();
+	return ret;
+}
+
+
+uint32_t _kv_nvme_iterate_open(kv_nvme_t *nvme, const uint8_t keyspace_id, const uint32_t bitmask, const uint32_t prefix, const uint8_t iterate_type, int qid){
         uint32_t iterator = KV_INVALID_ITERATE_HANDLE;
         uint32_t ret = KV_ERR_DD_INVALID_PARAM;
         struct spdk_nvme_qpair *qpair = NULL;
@@ -470,7 +496,7 @@ uint32_t _kv_nvme_iterate_open(kv_nvme_t *nvme, const uint32_t bitmask, const ui
                 return ret;
         }
 
-        qpair = nvme->qpairs[core_id];
+        qpair = nvme->qpairs[qid];
 
         if(!qpair) {
                 KVNVME_ERR("No Matching I/O Queue found for the Passed CPU Core ID");
@@ -478,10 +504,10 @@ uint32_t _kv_nvme_iterate_open(kv_nvme_t *nvme, const uint32_t bitmask, const ui
                 return ret;
         }
 
-        pthread_spin_lock(&qpair->q_lock);
-        ret = spdk_nvme_kv_cmd_iterate_open(nvme->ns, qpair, bitmask, prefix, _kv_io_complete, &io_sequence, 0, (KV_ITERATE_REQUEST_OPEN | (it_type_base<<iterate_type)));
+        pthread_spin_lock(&qpair->sq_lock);
+        ret = spdk_nvme_kv_cmd_iterate_open(nvme->ns, qpair, keyspace_id, bitmask, prefix, _kv_io_complete, &io_sequence, 0, (KV_ITERATE_REQUEST_OPEN | (it_type_base<<iterate_type)));
         if(ret) {
-                pthread_spin_unlock(&qpair->q_lock);
+                pthread_spin_unlock(&qpair->sq_lock);
                 KVNVME_ERR("Error in Performing Key Iterate on the KV Type SSD\n");
                 LEAVE();
                 return ret;
@@ -492,7 +518,7 @@ uint32_t _kv_nvme_iterate_open(kv_nvme_t *nvme, const uint32_t bitmask, const ui
 #endif
 
 
-	int queue_is_sync = ((nvme->io_queue_type[core_id] == SYNC_IO_QUEUE) ? 1 : 0);
+	int queue_is_sync = ((nvme->io_queue_type[qid] == SYNC_IO_QUEUE) ? 1 : 0);
 	if(queue_is_sync){
 		while(!io_sequence.is_completed) {
 			spdk_nvme_qpair_process_completions(qpair, 0);
@@ -503,7 +529,7 @@ uint32_t _kv_nvme_iterate_open(kv_nvme_t *nvme, const uint32_t bitmask, const ui
 			usleep(1);
 		}
 	}
-        pthread_spin_unlock(&qpair->q_lock);
+        pthread_spin_unlock(&qpair->sq_lock);
 
         KVNVME_DEBUG("Result of the I/O: %d, Status of the I/O: %d", io_sequence.result, io_sequence.status);
 
@@ -514,7 +540,7 @@ uint32_t _kv_nvme_iterate_open(kv_nvme_t *nvme, const uint32_t bitmask, const ui
 
 }
 
-int _kv_nvme_iterate_close(kv_nvme_t *nvme, const uint8_t iterator, int core_id){
+int _kv_nvme_iterate_close(kv_nvme_t *nvme, const uint8_t iterator, int qid){
         uint32_t ret = KV_ERR_DD_INVALID_PARAM;
         struct spdk_nvme_qpair *qpair = NULL;
         nvme_cmd_sequence_t io_sequence = {0};
@@ -527,7 +553,7 @@ int _kv_nvme_iterate_close(kv_nvme_t *nvme, const uint8_t iterator, int core_id)
                 return ret;
         }
 
-        qpair = nvme->qpairs[core_id];
+        qpair = nvme->qpairs[qid];
 
         if(!qpair) {
                 KVNVME_ERR("No Matching I/O Queue found for the Passed CPU Core ID");
@@ -535,16 +561,16 @@ int _kv_nvme_iterate_close(kv_nvme_t *nvme, const uint8_t iterator, int core_id)
                 return ret;
         }
 
-        pthread_spin_lock(&qpair->q_lock);
+        pthread_spin_lock(&qpair->sq_lock);
         ret = spdk_nvme_kv_cmd_iterate_close(nvme->ns, qpair, iterator, _kv_io_complete, &io_sequence, 0, KV_ITERATE_REQUEST_CLOSE);
         if(ret) {
-                pthread_spin_unlock(&qpair->q_lock);
+                pthread_spin_unlock(&qpair->sq_lock);
                 KVNVME_ERR("Error in Performing Key Iterate on the KV Type SSD");
                 LEAVE();
                 return ret;
         }
 
-	int queue_is_sync = ((nvme->io_queue_type[core_id] == SYNC_IO_QUEUE) ? 1 : 0);
+	int queue_is_sync = ((nvme->io_queue_type[qid] == SYNC_IO_QUEUE) ? 1 : 0);
 	if(queue_is_sync){
 		while(!io_sequence.is_completed) {
 			spdk_nvme_qpair_process_completions(qpair, 0);
@@ -555,7 +581,7 @@ int _kv_nvme_iterate_close(kv_nvme_t *nvme, const uint8_t iterator, int core_id)
 			usleep(1);
 		}
 	}
-        pthread_spin_unlock(&qpair->q_lock);
+        pthread_spin_unlock(&qpair->sq_lock);
 
         KVNVME_DEBUG("Result of the I/O: %d, Status of the I/O: %d", io_sequence.result, io_sequence.status);
 
@@ -564,7 +590,7 @@ int _kv_nvme_iterate_close(kv_nvme_t *nvme, const uint8_t iterator, int core_id)
         return io_sequence.status;
 }
 
-int _kv_nvme_iterate_read(kv_nvme_t* nvme, kv_iterate* it, int core_id){
+int _kv_nvme_iterate_read(kv_nvme_t* nvme, kv_iterate* it, int qid){
         int ret = KV_ERR_DD_INVALID_PARAM;
         struct spdk_nvme_qpair *qpair = NULL;
         nvme_cmd_sequence_t io_sequence = {0};
@@ -580,7 +606,7 @@ int _kv_nvme_iterate_read(kv_nvme_t* nvme, kv_iterate* it, int core_id){
                 return ret;
         }
 
-        qpair = nvme->qpairs[core_id];
+        qpair = nvme->qpairs[qid];
 
         if(!qpair) {
                 KVNVME_ERR("No Matching I/O Queue found for the Passed CPU Core ID");
@@ -615,10 +641,10 @@ int _kv_nvme_iterate_read(kv_nvme_t* nvme, kv_iterate* it, int core_id){
 	io_sequence.result = (it->kv.key.length<<24) | (it->kv.value.length);
 #else
 
-	pthread_spin_lock(&qpair->q_lock);
+	pthread_spin_lock(&qpair->sq_lock);
 	ret = spdk_nvme_kv_cmd_iterate_read(nvme->ns, qpair, it->iterator, it->kv.value.value, it->kv.value.length, it->kv.value.offset, _kv_io_complete, &io_sequence, 0, it->kv.param.io_option.iterate_read_option);
 	if(ret) {
-		pthread_spin_unlock(&qpair->q_lock);
+		pthread_spin_unlock(&qpair->sq_lock);
 		KVNVME_ERR("Error in Performing Key Iterate on the KV Type SSD");
 		LEAVE();
 		return ret;
@@ -627,7 +653,7 @@ int _kv_nvme_iterate_read(kv_nvme_t* nvme, kv_iterate* it, int core_id){
 	while(!io_sequence.is_completed) {
 		spdk_nvme_qpair_process_completions(qpair, 0);
 	}
-	pthread_spin_unlock(&qpair->q_lock);
+	pthread_spin_unlock(&qpair->sq_lock);
 #endif
 
         KVNVME_DEBUG("Result of the I/O: %d, Status of the I/O: %d", io_sequence.result, io_sequence.status);
@@ -647,7 +673,7 @@ int _kv_nvme_iterate_read(kv_nvme_t* nvme, kv_iterate* it, int core_id){
         return io_sequence.status;
 }
 
-int _kv_nvme_iterate_read_async(kv_nvme_t *nvme, kv_iterate* it, int core_id){
+int _kv_nvme_iterate_read_async(kv_nvme_t *nvme, kv_iterate* it, int qid){
         int ret = KV_ERR_DD_INVALID_PARAM;
         struct spdk_nvme_qpair *qpair = NULL;
 
@@ -662,7 +688,7 @@ int _kv_nvme_iterate_read_async(kv_nvme_t *nvme, kv_iterate* it, int core_id){
                 return ret;
         }
 
-        qpair = nvme->qpairs[core_id];
+        qpair = nvme->qpairs[qid];
 
         if(!qpair) {
                 KVNVME_ERR("No Matching I/O Queue found for the Passed CPU Core ID");
@@ -700,17 +726,13 @@ int _kv_nvme_iterate_read_async(kv_nvme_t *nvme, kv_iterate* it, int core_id){
 	_kv_iterate_read_async_cb(it, &cpl);
 	ret = KV_SUCCESS;
 #else
-        pthread_spin_lock(&qpair->q_lock);
+        pthread_spin_lock(&qpair->sq_lock);
         ret = spdk_nvme_kv_cmd_iterate_read(nvme->ns, qpair, it->iterator, it->kv.value.value, it->kv.value.length, it->kv.value.offset, _kv_iterate_read_async_cb, (void *)it, 0, it->kv.param.io_option.iterate_read_option);
         if(ret) {
-                pthread_spin_unlock(&qpair->q_lock);
                 //KVNVME_ERR("Error in Performing Retrieve on the KV Type SSD");
-                LEAVE();
-                return ret;
         }
-        pthread_spin_unlock(&qpair->q_lock);
+        pthread_spin_unlock(&qpair->sq_lock);
 #endif
-
         LEAVE();
         return ret;
 

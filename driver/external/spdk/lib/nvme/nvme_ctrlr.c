@@ -423,9 +423,9 @@ nvme_ctrlr_shutdown(struct spdk_nvme_ctrlr *ctrlr)
 
 		nvme_delay(1000);
 		ms_waited++;
-	} while (ms_waited < 5000);
+	} while (ms_waited < 30000);
 
-	SPDK_ERRLOG("did not shutdown within 5 seconds\n");
+	SPDK_ERRLOG("did not shutdown within 30 seconds\n");
 }
 
 static int

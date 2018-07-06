@@ -98,6 +98,7 @@ int sdk_iterate(void){
                 kv[i] = (kv_pair*)malloc(sizeof(kv_pair));
 		fail_unless(kv[i] != NULL);
 
+                kv[i]->keyspace_id = KV_KEYSPACE_IODATA;
                 kv[i]->key.key = malloc(key_length);
 		fail_unless(kv[i]->key.key != NULL);
 		kv[i]->key.length = key_length;
@@ -113,10 +114,10 @@ int sdk_iterate(void){
 	kv_iterate* it = (kv_iterate*)malloc(sizeof(kv_iterate));
 	fail_unless(it != NULL);
 	it->iterator = KV_INVALID_ITERATE_HANDLE;
-	it->kv.key.key = malloc(key_length);
+	it->kv.key.key = malloc(key_length + 1);
 	fail_unless(it->kv.key.key != NULL);
 	it->kv.key.length = key_length;
-	memset(it->kv.key.key, 0, it->kv.key.length);
+	memset(it->kv.key.key, 0, it->kv.key.length + 1);
 
 	it->kv.value.value = malloc(iterate_buffer_size);
 	fail_unless(it->kv.value.value != NULL);
@@ -175,8 +176,8 @@ int sdk_iterate(void){
         if(ret == KV_SUCCESS){
                 printf("iterate_handle count=%d\n",nr_iterate_handle);
                 for(i=0;i<nr_iterate_handle;i++){
-                        fprintf(stderr, "Retrieve iterate_handle_info[%d] : info.handle_id=%d info.status=%d info.type=%d info.prefix=%08x info.bitmask=%08x\n",
-                                i+1, info[i].handle_id, info[i].status, info[i].type, info[i].prefix, info[i].bitmask);
+                        fprintf(stderr, "Retrieve iterate_handle_info[%d] : info.handle_id=%d info.status=%d info.type=%d info.keyspace_id=%d info.prefix=%08x info.bitmask=%08x info.is_eof=%d\n",
+                                i+1, info[i].handle_id, info[i].status, info[i].type, info[i].keyspace_id, info[i].prefix, info[i].bitmask, info[i].is_eof);
                         if(info[i].status == ITERATE_HANDLE_OPENED){
                                 fprintf(stderr, "close iterate_handle : %d\n", info[i].handle_id);
                                 kv_iterate_close(handle, info[i].handle_id);
@@ -189,20 +190,21 @@ int sdk_iterate(void){
 	uint32_t prefix = 0;
 	memcpy(&prefix,kv[0]->key.key,4);
         uint32_t iterator = KV_INVALID_ITERATE_HANDLE;
+	uint8_t keyspace_id = KV_KEYSPACE_IODATA;
 	fprintf(stderr,"DONE\n");
-	fprintf(stderr,"bitmask=0x%x bit_pattern=0x%x\n",bitmask, prefix);
+	fprintf(stderr,"keyspace_id=%d bitmask=0x%x bit_pattern=0x%x\n",keyspace_id, bitmask, prefix);
 
         gettimeofday(&start, NULL);
-        iterator = kv_iterate_open(handle, bitmask, prefix, KV_KEY_ITERATE);
-        //iterator = kv_iterate_open(handle, bitmask, prefix, KV_KEY_ITERATE_WITH_RETRIEVE);
+        iterator = kv_iterate_open(handle, keyspace_id, bitmask, prefix, KV_KEY_ITERATE);
+        //iterator = kv_iterate_open(handle, keyspace_id, bitmask, prefix, KV_KEY_ITERATE_WITH_RETRIEVE);
         gettimeofday(&end, NULL);
 
 	memset((char*)&info,0,sizeof(info));
         ret = kv_iterate_info(handle, info, nr_iterate_handle);
         if(ret == KV_SUCCESS){
 		for(i=0;i<nr_iterate_handle;i++){
-			fprintf(stderr, "Current iterate_handle_info[%d] : info.handle_id=%d info.status=%d info.type=%d info.prefix=%08x info.bitmask=%08x\n",
-				i+1, info[i].handle_id, info[i].status, info[i].type, info[i].prefix, info[i].bitmask);
+                        fprintf(stderr, "Retrieve iterate_handle_info[%d] : info.handle_id=%d info.status=%d info.type=%d info.keyspace_id=%d info.prefix=%08x info.bitmask=%08x info.is_eof=%d\n",
+                                i+1, info[i].handle_id, info[i].status, info[i].type, info[i].keyspace_id, info[i].prefix, info[i].bitmask, info[i].is_eof);
 		}
 	}
 
@@ -215,6 +217,7 @@ int sdk_iterate(void){
 		do{
 			int request_read_size = iterate_buffer_size;
                         it->iterator = iterator;
+			it->kv.keyspace_id = 0;
                         it->kv.param.io_option.iterate_read_option = KV_ITERATE_READ_DEFAULT;
                         it->kv.value.length = request_read_size;
                         it->kv.value.offset = 0;

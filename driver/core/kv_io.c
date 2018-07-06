@@ -36,23 +36,6 @@
 #include "kv_cmd.h"
 #include "lba_cmd.h"
 
-static void process_cqs(kv_nvme_t *nvme) {
-        struct spdk_nvme_qpair *qpair = NULL;
-        unsigned int queue_is_async = 0;
-        unsigned int queue_id = 0;
-
-        for(queue_id = 0; queue_id < MAX_CPU_CORES; queue_id++) {
-                qpair = nvme->qpairs[queue_id];
-                queue_is_async = ((nvme->io_queue_type[queue_id] == ASYNC_IO_QUEUE) ? 1 : 0);
-
-                if(qpair && queue_is_async) {
-                        spdk_nvme_qpair_process_completions(qpair, 0);
-                }
-
-                queue_is_async = 0;
-        }
-}
-
 int32_t kv_nvme_process_all_cqs_thread(void *arg) {
         unsigned int cpu_id = 0;
         cpu_set_t cpuset;
@@ -71,7 +54,7 @@ int32_t kv_nvme_process_all_cqs_thread(void *arg) {
         nvme->stop_process_all_cqs = 0;
 
         while(!nvme->stop_process_all_cqs) {
-                process_cqs(nvme);
+                kv_nvme_process_completion((uint64_t)nvme);
 		usleep(1);
         }
 
@@ -82,6 +65,7 @@ int32_t kv_nvme_process_all_cqs_thread(void *arg) {
 }
 
 int32_t kv_nvme_process_cq_thread(void *arg) {
+	struct spdk_nvme_qpair *qpair = NULL;
         unsigned int queue_id = 0;
         cpu_set_t cpuset;
         process_cq_thread_arg_t *pcq_arg = (process_cq_thread_arg_t *)arg;
@@ -98,7 +82,10 @@ int32_t kv_nvme_process_cq_thread(void *arg) {
         while(!pcq_arg->nvme->stop_process_cq[pcq_arg->thread_id]) {
                 for(queue_id = pcq_arg->async_qpair_start_index; queue_id < (pcq_arg->async_qpair_start_index + pcq_arg->num_async_qpairs); queue_id++)
                 {
-                        spdk_nvme_qpair_process_completions(pcq_arg->nvme->async_qpairs[queue_id], 0);
+			qpair = pcq_arg->nvme->async_qpairs[queue_id];
+			pthread_spin_lock(&qpair->cq_lock);
+			spdk_nvme_qpair_process_completions(qpair, 0);
+			pthread_spin_unlock(&qpair->cq_lock);
                 }
 		usleep(1);
         }

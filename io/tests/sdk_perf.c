@@ -73,6 +73,7 @@ struct time_stamp *stamps;
 int insert_count;
 kv_sdk sdk_opt;
 kv_pair** kv;
+int g_exist_answer;
 
 unsigned long long seed = 0x0102030405060708LL;
 int is_miscompare(unsigned long long *v1, unsigned long long *v2) {
@@ -99,7 +100,6 @@ void* sdk_write(void* data) {
 			kv[i]->key.length = 8;
                 } else {
                         sprintf(kv[i]->key.key, "%04d%12d",tid,i);
-			kv[i]->key.length = strlen(kv[i]->key.key);
                 }
 		kv[i]->param.io_option.store_option = KV_STORE_DEFAULT;
 		kv[i]->param.private_data = NULL;
@@ -113,7 +113,7 @@ void* sdk_write(void* data) {
 			fprintf(stderr, "%d ", (i - (tid * insert_count)));
 		}
 		gettimeofday(&stamps[i].start, NULL);
-		fail_unless(0 == kv_store(handle, kv[i]));
+		fail_unless(KV_SUCCESS == kv_store(handle, kv[i]));
 		gettimeofday(&stamps[i].end, NULL);
 	}
 	gettimeofday(param->t_end, NULL);
@@ -140,7 +140,6 @@ void* sdk_read(void* data) {
 			kv[i]->key.length = 8;
                 } else {
                         sprintf(kv[i]->key.key, "%04d%12d",tid,i);
-			kv[i]->key.length = strlen(kv[i]->key.key);
                 }
 		kv[i]->param.io_option.retrieve_option = KV_RETRIEVE_DEFAULT;
 		kv[i]->param.private_data = NULL;
@@ -155,6 +154,46 @@ void* sdk_read(void* data) {
 		}
 		gettimeofday(&stamps[i].start, NULL);
 		fail_unless(0 == kv_retrieve(handle, kv[i]));
+		gettimeofday(&stamps[i].end, NULL);
+	}
+	gettimeofday(param->t_end, NULL);
+	fprintf(stderr, "Done\n");
+}
+
+void* sdk_exist(void* data) {
+        thread_param *param = (thread_param*)data;
+        int ret, i, tid = param->tid;
+        int core_id = param->core_id;
+        uint64_t handle = param->device_handle;
+
+	//set affinity as core_id
+	cpu_set_t cpuset;
+	CPU_ZERO(&cpuset);
+	CPU_SET(core_id, &cpuset);
+	sched_setaffinity(0, sizeof(cpu_set_t), &cpuset);
+
+	fprintf(stderr, "[cid=%d][tid=%d][handle=%lu]kv_exist: ", core_id, tid, handle);
+	//prepare
+	for (i = 0 + (tid * insert_count); i < insert_count + (tid * insert_count); i++) {
+		sprintf(kv[i]->key.key, "%04d%12d", tid, i);
+		kv[i]->param.io_option.exist_option = KV_EXIST_DEFAULT;
+		kv[i]->param.private_data = NULL;
+		kv[i]->param.async_cb = NULL;
+	}
+
+	//IO
+	gettimeofday(param->t_start, NULL);
+	for (i = 0 + (tid * insert_count); i < insert_count + (tid * insert_count); i++) {
+		if (!((i - (tid * insert_count)) % DISPLAY_CNT)) {
+			fprintf(stderr, "%d ", (i - (tid * insert_count)));
+		}
+		gettimeofday(&stamps[i].start, NULL);
+		//fail_unless(g_exist_answer == kv_exist(handle, kv[i]));
+		ret = kv_exist(handle, kv[i]);
+		if(g_exist_answer != ret) {
+			fprintf(stderr, "%s fail: returned status(0x%x) != expected value(0x%x)\n", __FUNCTION__, ret, g_exist_answer);
+			exit(1);
+		}
 		gettimeofday(&stamps[i].end, NULL);
 	}
 	gettimeofday(param->t_end, NULL);
@@ -176,8 +215,12 @@ void* sdk_delete(void* data) {
 	fprintf(stderr, "[cid=%d][tid=%d][handle=%lu]kv_delete: ", core_id, tid, handle);
 	//prepare
 	for (i = 0 + (tid * insert_count); i < insert_count + (tid * insert_count); i++) {
-		sprintf(kv[i]->key.key, "%04d%12d", tid, i);
-		kv[i]->key.length = strlen(kv[i]->key.key);
+		if(sdk_opt.ssd_type == LBA_TYPE_SSD) {
+			*((uint64_t*)(kv[i]->key.key)) = i * (kv[i]->value.length / SECTOR_SIZE);
+			kv[i]->key.length = 8;
+		} else {
+			sprintf(kv[i]->key.key, "%04d%12d",tid,i);
+		}
 		kv[i]->param.io_option.delete_option = KV_DELETE_DEFAULT;
 		kv[i]->param.private_data = NULL;
 		kv[i]->param.async_cb = NULL;
@@ -280,6 +323,7 @@ int sdk_perf() {
 		kv[i] = (kv_pair*) malloc(sizeof(kv_pair));
 		fail_unless(kv[i] != NULL);
 
+		kv[i]->keyspace_id = KV_KEYSPACE_IODATA;
 		kv[i]->key.key = malloc(key_length);
 		fail_unless(kv[i]->key.key != NULL);
 		kv[i]->key.length = key_length;
@@ -315,7 +359,12 @@ int sdk_perf() {
 		}
 		used_size = kv_get_used_size(handle);
 		if (used_size != KV_ERR_INVALID_VALUE) {
-			fprintf(stderr, "  -Used Size of the NVMe Device: %.2f %s\n", (float) used_size / 100, "%");
+	                if(sdk_opt.ssd_type == KV_TYPE_SSD){
+                                printf("  -Used Size of the NVMe Device: %.2f %s \n", (float)used_size / 100, "%");
+                        }
+                        else{
+                                printf("  -Used Size of the NVMe Device: %lld MB\n", (unsigned long long)used_size / MB);
+                        }
 		}
 		waf = kv_get_waf(handle);
 		if (waf != KV_ERR_INVALID_VALUE) {
@@ -367,10 +416,11 @@ int sdk_perf() {
 		printf("Miscompare count: %u\n\n\n", miscompare_cnt);
 	}
 
+	// Exist
 	if (sdk_opt.ssd_type == KV_TYPE_SSD) {
-		// Delete
+		g_exist_answer = KV_SUCCESS;
 		for (i = 0; i < nthreads; i++) {
-			fail_unless(0 <= pthread_create(&t[i], NULL, sdk_delete, &p[i]));
+			fail_unless(0 <= pthread_create(&t[i], NULL, sdk_exist, &p[i]));
 		}
 
 		for (i = 0; i < nthreads; i++) {
@@ -380,7 +430,39 @@ int sdk_perf() {
 		for (i = 0; i < insert_count * nthreads; i++) {
 			add_latency_stat(&stat, &stamps[i].start, &stamps[i].end);
 		}
-		show_elapsed_time_cumulative(thread_start, thread_end, nthreads, "kv_delete", insert_count, value_size, &stat);
+		show_elapsed_time_cumulative(thread_start, thread_end, nthreads, "kv_exist", insert_count, value_size, &stat);
+	}
+
+	// Delete
+	for (i = 0; i < nthreads; i++) {
+		fail_unless(0 <= pthread_create(&t[i], NULL, sdk_delete, &p[i]));
+	}
+
+	for (i = 0; i < nthreads; i++) {
+		pthread_join(t[i], (void**) &status[i]);
+	}
+	reset_latency_stat(&stat);
+	for (i = 0; i < insert_count * nthreads; i++) {
+		add_latency_stat(&stat, &stamps[i].start, &stamps[i].end);
+	}
+	show_elapsed_time_cumulative(thread_start, thread_end, nthreads, "kv_delete", insert_count, value_size, &stat);
+
+
+	// Exist after delete
+	if (sdk_opt.ssd_type == KV_TYPE_SSD) {
+		g_exist_answer = KV_ERR_NOT_EXIST_KEY;
+		for (i = 0; i < nthreads; i++) {
+			fail_unless(0 <= pthread_create(&t[i], NULL, sdk_exist, &p[i]));
+		}
+
+		for (i = 0; i < nthreads; i++) {
+			pthread_join(t[i], (void**) &status[i]);
+		}
+		reset_latency_stat(&stat);
+		for (i = 0; i < insert_count * nthreads; i++) {
+			add_latency_stat(&stat, &stamps[i].start, &stamps[i].end);
+		}
+		show_elapsed_time_cumulative(thread_start, thread_end, nthreads, "kv_exist", insert_count, value_size, &stat);
 	}
 
 	//Print device information after test
@@ -397,7 +479,12 @@ int sdk_perf() {
 		}
 		used_size = kv_get_used_size(handle);
 		if (used_size != KV_ERR_INVALID_VALUE) {
-			fprintf(stderr, "  -Used Size of the NVMe Device: %.2f %s\n", (float) used_size / 100, "%");
+                        if(sdk_opt.ssd_type == KV_TYPE_SSD){
+                                printf("  -Used Size of the NVMe Device: %.2f %s \n", (float)used_size / 100, "%");
+                        }
+                        else{
+                                printf("  -Used Size of the NVMe Device: %lld MB\n", (unsigned long long)used_size / MB);
+                        }
 		}
 		waf = kv_get_waf(handle);
 		if (waf != KV_ERR_INVALID_VALUE) {

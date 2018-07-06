@@ -191,7 +191,7 @@ write_complete(void *arg, const struct spdk_nvme_cpl *completion)
 
 	// Try retrieve 
 	rc = spdk_nvme_kv_cmd_retrieve(ns_entry->ns, ns_entry->qpair,
-				   sequence->key, strlen(sequence->key),
+				   1, sequence->key, strlen(sequence->key),
 				   sequence->value, 0x1000,
 				   0, //offset
 				   read_complete, (void *)sequence, 
@@ -230,7 +230,7 @@ write_read_delete(void)
 		printf("PUT: key = %s\n", sequence.key);
 		printf("PUT: value = %s\n", sequence.value);
 		rc = spdk_nvme_kv_cmd_store(ns_entry->ns, ns_entry->qpair,
-					    sequence.key, strlen(sequence.key),
+					    1, sequence.key, strlen(sequence.key),
 					    sequence.value, strlen(sequence.value),
 					    0, //offset
 					    write_complete, &sequence,
@@ -254,7 +254,7 @@ write_read_delete(void)
 		printf("DELETE: key = %s\n", sequence.key);
 
 		rc = spdk_nvme_kv_cmd_delete(ns_entry->ns, ns_entry->qpair,
-						sequence.key, strlen(sequence.key), strlen(sequence.value), 0,
+						1, sequence.key, strlen(sequence.key), strlen(sequence.value), 0,
 						delete_complete, &sequence,
 						0, // io_flags
 						0  // option 0
@@ -335,7 +335,7 @@ hello_world(void)
 		printf("PUT: key = %s\n", sequence.key);
 		printf("PUT: value = %s\n", sequence.value);
 		rc = spdk_nvme_kv_cmd_store(ns_entry->ns, ns_entry->qpair, 
-					    sequence.key, strlen(sequence.key),
+					    1, sequence.key, strlen(sequence.key),
 					    sequence.value, strlen(sequence.value),
 					    0, //offset
 					    write_complete, &sequence, 
