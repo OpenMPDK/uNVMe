@@ -32,6 +32,7 @@
  */
 
 #include "spdk/likely.h"
+#include "spdk/util.h"
 #include "kv_driver.h"
 #include "kv_cmd.h"
 
@@ -40,6 +41,7 @@
 static uint8_t iterate_handle_type;
 #endif
 
+#define GENERAL_KV_SSD
 
 static void _kv_io_complete(void *arg, const struct spdk_nvme_cpl *completion) {
         nvme_cmd_sequence_t *io_sequence = NULL;
@@ -69,7 +71,62 @@ static void _kv_async_io_complete(void *arg, const struct spdk_nvme_cpl *complet
         status = completion->status.sc;
         result = completion->cdw0;
 
+	if(kv->param.async_cb) {
+                kv->param.async_cb(kv, result, status);
+	}
+
+	LEAVE();
+}
+
+static void _kv_retrieve_async_io_complete(void *arg, const struct spdk_nvme_cpl *completion) {
+        kv_pair *kv = NULL;
+        unsigned int status = 0, result = 0;
+
+        ENTER();
+
+        kv = (kv_pair *)arg;
+
+        status = completion->status.sc;
+        result = completion->cdw0;
+
         KVNVME_DEBUG("Status of the Async I/O: %d, Result of the Async I/O: %d, kv->key.key: %s", status, result, (char *)kv->key.key);
+
+	if(status == KV_SUCCESS){
+		kv->value.length = spdk_min(kv->value.length,result);
+		kv->value.actual_value_size = result;
+	}
+	else{
+		kv->value.length = 0;
+		kv->value.actual_value_size = 0;
+	}
+
+        if(kv->param.async_cb) {
+                kv->param.async_cb(kv, result, status);
+        }
+
+        LEAVE();
+}
+
+static void _kv_store_async_io_complete(void *arg, const struct spdk_nvme_cpl *completion) {
+        kv_pair *kv = NULL;
+        unsigned int status = 0, result = 0;
+
+        ENTER();
+
+        kv = (kv_pair *)arg;
+
+        status = completion->status.sc;
+        result = completion->cdw0;
+
+        KVNVME_DEBUG("Status of the Async I/O: %d, Result of the Async I/O: %d, kv->key.key: %s", status, result, (char *)kv->key.key);
+
+	if(status == KV_SUCCESS){
+		kv->value.actual_value_size = kv->value.length;
+	}
+	else{
+		kv->value.length = 0;
+		kv->value.actual_value_size = 0;
+	}
 
         if(kv->param.async_cb) {
                 kv->param.async_cb(kv, result, status);
@@ -92,7 +149,16 @@ static void _kv_iterate_read_async_cb(void *arg, const struct spdk_nvme_cpl *com
         KVNVME_DEBUG("Status of the Async I/O: %d, Result of the Async I/O: %d", status, result);
 
         if(it->kv.param.async_cb) {
-		//it->iterator = (uint8_t)((result&0x00FF0000)>>16);	//iterator id
+#ifdef GENERAL_KV_SSD
+		it->kv.key.length = 0;	// general KV SSD supports key only iterate
+		uint32_t transfer_byte_size = result;
+		if(spdk_likely(it->kv.value.length >= transfer_byte_size)){
+			it->kv.value.length = transfer_byte_size;
+		}
+		else{
+			KVNVME_ERR("warning : transfer_byte_size from cdw0=%d, while value.length from caller=%d\n", transfer_byte_size, it->kv.value.length);
+		}
+#else
 		it->kv.key.length=((result&0xFF000000)>>24);		//msb 1B: key length
 		uint32_t value_size = (result&0xFFFFFF);		//lsb 3B: value length
 		if(spdk_likely(it->kv.value.length >= value_size)){
@@ -101,6 +167,7 @@ static void _kv_iterate_read_async_cb(void *arg, const struct spdk_nvme_cpl *com
 		else{
 			KVNVME_ERR("warning : value.length from cdw0=%d, while value.length from caller=%d\n", value_size, it->kv.value.length);
 		}
+#endif
 		KVNVME_DEBUG("status=%d key.length=%d value.length=%d\n",status, it->kv.key.length, it->kv.value.length);
                 it->kv.param.async_cb(it, it->kv.value.length, status);
         }
@@ -108,14 +175,14 @@ static void _kv_iterate_read_async_cb(void *arg, const struct spdk_nvme_cpl *com
         LEAVE();
 }
 
-int _kv_nvme_store(kv_nvme_t *nvme, const kv_pair *kv, int qid, uint8_t is_store) {
+int _kv_nvme_store(kv_nvme_t *nvme, kv_pair *kv, int qid, uint8_t is_store) {
         int ret = KV_ERR_DD_INVALID_PARAM;
         struct spdk_nvme_qpair *qpair = NULL;
         nvme_cmd_sequence_t io_sequence = {0};
 
         ENTER();
 
-        if(!kv || !kv->key.key || !kv->value.value) {
+        if(!kv || !kv->key.key) {
                 KVNVME_ERR("Invalid Parameters passed");
                 LEAVE();
                 return ret;
@@ -144,18 +211,26 @@ int _kv_nvme_store(kv_nvme_t *nvme, const kv_pair *kv, int qid, uint8_t is_store
         }
         pthread_spin_unlock(&qpair->sq_lock);
 
+	if(io_sequence.status == KV_SUCCESS){
+		kv->value.actual_value_size = kv->value.length;
+	}
+	else{
+		kv->value.length = 0;
+		kv->value.actual_value_size = 0;
+	}
+
         KVNVME_DEBUG("Result of the I/O: %d, Status of the I/O: %d", io_sequence.result, io_sequence.status);
         LEAVE();
         return io_sequence.status;
 }
 
-int _kv_nvme_store_async(kv_nvme_t *nvme, const kv_pair *kv, int qid) {
+int _kv_nvme_store_async(kv_nvme_t *nvme, kv_pair *kv, int qid) {
         int ret = KV_ERR_DD_INVALID_PARAM;
         struct spdk_nvme_qpair *qpair = NULL;
 
         ENTER();
 
-        if(!kv || !kv->key.key || !kv->value.value) {
+        if(!kv || !kv->key.key) {
                 KVNVME_ERR("Invalid Parameters passed");
                 LEAVE();
                 return ret;
@@ -170,7 +245,7 @@ int _kv_nvme_store_async(kv_nvme_t *nvme, const kv_pair *kv, int qid) {
         }
 
         pthread_spin_lock(&qpair->sq_lock);
-        ret = spdk_nvme_kv_cmd_store(nvme->ns, qpair, kv->keyspace_id, kv->key.key, kv->key.length, kv->value.value, kv->value.length, kv->value.offset, _kv_async_io_complete, (void *)kv, 0, kv->param.io_option.store_option, true);
+        ret = spdk_nvme_kv_cmd_store(nvme->ns, qpair, kv->keyspace_id, kv->key.key, kv->key.length, kv->value.value, kv->value.length, kv->value.offset, _kv_store_async_io_complete, (void *)kv, 0, kv->param.io_option.store_option, true);
         if(ret) {
 //              KVNVME_ERR("Error in Performing Store on the KV Type SSD");
         }
@@ -186,7 +261,7 @@ int _kv_nvme_retrieve(kv_nvme_t *nvme, kv_pair *kv, int qid) {
 
         ENTER();
 
-        if(!kv || !kv->key.key || !kv->value.value) {
+        if(!kv || !kv->key.key) {
                 KVNVME_ERR("Invalid Parameters passed");
                 LEAVE();
                 return ret;
@@ -224,7 +299,14 @@ int _kv_nvme_retrieve(kv_nvme_t *nvme, kv_pair *kv, int qid) {
 
         KVNVME_DEBUG("Result of the I/O: %d, Status of the I/O: %d", io_sequence.result, io_sequence.status);
 
-        kv->value.length = io_sequence.result;
+	if(io_sequence.status == KV_SUCCESS){
+		kv->value.length = spdk_min(kv->value.length,io_sequence.result);
+		kv->value.actual_value_size = io_sequence.result;
+	}
+	else{
+		kv->value.length = 0;
+		kv->value.actual_value_size = 0;
+	}
 
         LEAVE();
         return io_sequence.status;
@@ -236,7 +318,7 @@ int _kv_nvme_retrieve_async(kv_nvme_t *nvme, kv_pair *kv, int qid) {
 
         ENTER();
 
-        if(!kv || !kv->key.key || !kv->value.value) {
+        if(!kv || !kv->key.key) {
                 KVNVME_ERR("Invalid Parameters passed");
                 LEAVE();
                 return ret;
@@ -251,7 +333,7 @@ int _kv_nvme_retrieve_async(kv_nvme_t *nvme, kv_pair *kv, int qid) {
         }
 
         pthread_spin_lock(&qpair->sq_lock);
-        ret = spdk_nvme_kv_cmd_retrieve(nvme->ns, qpair, kv->keyspace_id, kv->key.key, kv->key.length, kv->value.value, kv->value.length, kv->value.offset, _kv_async_io_complete, (void *)kv, 0, kv->param.io_option.retrieve_option);
+        ret = spdk_nvme_kv_cmd_retrieve(nvme->ns, qpair, kv->keyspace_id, kv->key.key, kv->key.length, kv->value.value, kv->value.length, kv->value.offset, _kv_retrieve_async_io_complete, (void *)kv, 0, kv->param.io_option.retrieve_option);
 
         if(ret) {
 //              KVNVME_ERR("Error in Performing Retrieve on the KV Type SSD");
@@ -496,6 +578,21 @@ uint32_t _kv_nvme_iterate_open(kv_nvme_t *nvme, const uint8_t keyspace_id, const
                 return ret;
         }
 
+#ifdef GENERAL_KV_SSD
+	if(iterate_type != KV_KEY_ITERATE && iterate_type != KV_KEY_ITERATE_WITH_DELETE){
+		KVNVME_ERR("Invalid iterate type");
+		LEAVE();
+		return KV_ERR_ITERATE_ERROR;
+	
+	}
+#else
+	if(iterate_type != KV_KEY_ITERATE && iterate_type != KV_KEY_ITERATE_WITH_RETRIEVE && iterate_type != KV_KEY_ITERATE_WITH_DELETE){
+		KVNVME_ERR("Invalid iterate type");
+		LEAVE();
+		return KV_ERR_ITERATE_ERROR;
+	}
+#endif
+
         qpair = nvme->qpairs[qid];
 
         if(!qpair) {
@@ -659,6 +756,16 @@ int _kv_nvme_iterate_read(kv_nvme_t* nvme, kv_iterate* it, int qid){
         KVNVME_DEBUG("Result of the I/O: %d, Status of the I/O: %d", io_sequence.result, io_sequence.status);
 
 	//it->iterator = (uint8_t)((io_sequence.result&0x00FF0000)>>16);	//iterator id
+#ifndef GENERAL_KV_SSD
+	it->kv.key.length=0;	// general kv ssd only supports key-only iterate
+	uint32_t transfer_byte_size = io_sequence.result;				//lsb 3B : value length
+	if(spdk_likely(it->kv.value.length >= transfer_byte_size)){
+		it->kv.value.length = transfer_byte_size;
+	}
+	else{
+		KVNVME_ERR("warning : transfer_byte_size from cdw0=%d, while value.length from caller=%d\n", transfer_byte_size, it->kv.value.length);
+	}
+#else
 	it->kv.key.length=((io_sequence.result&0xFF000000)>>24);		//msb 1B : key length
 	uint32_t value_size = (io_sequence.result&0xFFFFFF);				//lsb 3B : value length
 	if(spdk_likely(it->kv.value.length >= value_size)){
@@ -667,6 +774,7 @@ int _kv_nvme_iterate_read(kv_nvme_t* nvme, kv_iterate* it, int qid){
 	else{
 		KVNVME_ERR("warning : value.length from cdw0=%d, while value.length from caller=%d\n", value_size, it->kv.value.length);
 	}
+#endif
         KVNVME_DEBUG("status=%d iterator=%d it->kv.key.length=%d it->kv.value.length=%d\n",io_sequence.status, it->iterator, it->kv.key.length, it->kv.value.length);
 
         LEAVE();
@@ -738,3 +846,59 @@ int _kv_nvme_iterate_read_async(kv_nvme_t *nvme, kv_iterate* it, int qid){
 
 }
 
+int kv_nvme_iterate_info(uint64_t handle, kv_iterate_handle_info* info, int nr_handle) {
+        int ret = KV_ERR_DD_INVALID_PARAM;
+        int handle_info_size = 16;
+        int log_id = 0xd0;
+        char logbuf[512];
+        int i;
+
+        ENTER();
+
+        if(!handle || !info || nr_handle <= 0|| nr_handle > KV_MAX_ITERATE_HANDLE){
+                KVNVME_ERR("Invalid paramter ");
+                LEAVE();
+                return ret;
+        }
+
+        memset(logbuf,0,sizeof(logbuf));
+        ret = kv_nvme_get_log_page(handle, log_id, logbuf, sizeof(logbuf));
+        if(ret != KV_SUCCESS){
+                ret = KV_ERR_IO;
+                return ret;
+        }
+
+        int offset = 0;
+
+        /* FIXED FORMAT */
+        for(i=0;i<nr_handle;i++){
+                offset = (i*handle_info_size);
+                info[i].handle_id = (*(uint8_t*)(logbuf + offset + 0));
+                info[i].status = (*(uint8_t*)(logbuf + offset + 1));
+                info[i].type = (*(uint8_t*)(logbuf + offset + 2));
+                info[i].keyspace_id = (*(uint8_t*)(logbuf + offset + 3));
+
+                info[i].prefix = (*(uint32_t*)(logbuf + offset + 4));
+                info[i].bitmask = (*(uint32_t*)(logbuf + offset + 8));
+		info[i].is_eof = (*(uint8_t*)(logbuf + offset + 12));
+                info[i].reserved[0] = (*(uint8_t*)(logbuf + offset + 13));
+                info[i].reserved[1] = (*(uint8_t*)(logbuf + offset + 14));
+                info[i].reserved[2] = (*(uint8_t*)(logbuf + offset + 15));
+                KVNVME_DEBUG("handle_id=%d status=%d type=%d prefix=%08x bitmask=%08x is_eof=%d\n",
+                        info[i].handle_id, info[i].status, info[i].type, info[i].prefix, info[i].bitmask, info[i].is_eof);
+        }
+
+        /*
+        for(i=0;i<*nr_handle;i++){
+                offset += (i*handle_info_size);
+                info[i].handle_id = (*(uint8_t*)(logbuf + offset + 0));
+                info[i].status = (*(uint8_t*)(logbuf + offset + 4));
+                info[i].prefix = (*(uint32_t*)(logbuf + offset + 8));
+                info[i].bitmask = (*(uint32_t*)(logbuf + offset + 12));
+                KVNVME_DEBUG("handle_id=%d status=%d prefix=%08x bitmask=%08x\n",
+		info[i].handle_id, info[i].status, info[i].prefix, info[i].bitmask);
+	}
+	*/
+	LEAVE();
+	return ret;
+}

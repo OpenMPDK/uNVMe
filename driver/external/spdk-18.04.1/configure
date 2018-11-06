@@ -1,0 +1,373 @@
+#!/usr/bin/env bash
+
+set -e
+
+function usage()
+{
+	echo "'configure' configures SPDK to compile on supported platforms."
+	echo ""
+	echo "Usage: ./configure [OPTION]..."
+	echo ""
+	echo "Defaults for the options are specified in brackets."
+	echo ""
+	echo "General:"
+	echo " -h, --help                Display this help and exit"
+	echo ""
+	echo " --prefix=path             Configure installation prefix (default: /usr/local)"
+	echo ""
+	echo " --enable-debug            Configure for debug builds"
+	echo " --enable-werror           Treat compiler warnings as errors"
+	echo " --enable-asan             Enable address sanitizer"
+	echo " --enable-ubsan            Enable undefined behavior sanitizer"
+	echo " --enable-coverage         Enable code coverage tracking"
+	echo " --enable-lto              Enable link-time optimization"
+	echo " --disable-tests           Disable building of tests"
+	echo " --with-env=path           Use an alternate environment implementation"
+	echo ""
+	echo "Specifying Dependencies:"
+	echo "--with-DEPENDENCY[=path]   Use the given dependency. Optionally, provide the"
+	echo "                           path."
+	echo "--without-DEPENDENCY       Do not link to the given dependency. This may"
+	echo "                           disable features and components."
+	echo ""
+	echo "Valid dependencies are listed below."
+	echo " dpdk                      Optional.  Uses dpdk submodule in spdk tree if not specified."
+	echo "                           example: /usr/share/dpdk/x86_64-default-linuxapp-gcc"
+	echo " fio                       Required to build fio_plugin."
+	echo "                           example: /usr/src/fio"
+	echo " vhost                     Required to build vhost target."
+	echo "                           No path required."
+	echo " virtio                    Required to build vhost initiator (Virtio) bdev module."
+	echo "                           No path required."
+	echo " pmdk                      Required to build persistent memory bdev."
+	echo "                           example: /usr/share/pmdk"
+	echo " vpp                       Required to build VPP net module."
+	echo "                           example: /vpp_repo/build-root/install-vpp-native/vpp"
+	echo " rbd                       [disabled]"
+	echo "                           No path required."
+	echo " rdma                      [disabled]"
+	echo "                           No path required."
+	echo " iscsi-initiator           [disabled]"
+	echo "                           No path required."
+	echo " vtune                     Required to profile I/O under Intel VTune Amplifier XE."
+	echo "                           example: /opt/intel/vtune_amplifier_xe_version"
+	echo ""
+	echo "Environment variables:"
+	echo ""
+	echo "CFLAGS                     C compiler flags"
+	echo "CXXFLAGS                   C++ compiler flags"
+	echo "LDFLAGS                    Linker flags"
+	echo "DESTDIR                    Destination for 'make install'"
+	echo ""
+}
+
+function check_dir() {
+	arg="$1"
+	dir="${arg#*=}"
+	if [ ! -d "$dir" ]; then
+		echo "$arg: directory not found"
+		exit 1
+	fi
+}
+
+for i in "$@"; do
+	case "$i" in
+		-h|--help)
+			usage
+			exit 0
+			;;
+		--prefix=*)
+			CONFIG_PREFIX="${i#*=}"
+			;;
+		--enable-debug)
+			CONFIG_DEBUG=y
+			;;
+		--disable-debug)
+			CONFIG_DEBUG=n
+			;;
+		--enable-asan)
+			CONFIG_ASAN=y
+			;;
+		--disable-asan)
+			CONFIG_ASAN=n
+			;;
+		--enable-ubsan)
+			CONFIG_UBSAN=y
+			;;
+		--disable-ubsan)
+			CONFIG_UBSAN=n
+			;;
+		--enable-tsan)
+			CONFIG_TSAN=y
+			;;
+		--disable-tsan)
+			CONFIG_TSAN=n
+			;;
+		--enable-coverage)
+			CONFIG_COVERAGE=y
+			;;
+		--disable-coverage)
+			CONFIG_COVERAGE=n
+			;;
+		--enable-lto)
+			CONFIG_LTO=y
+			;;
+		--disable-lto)
+			CONFIG_LTO=n
+			;;
+		--enable-tests)
+			CONFIG_TESTS=y
+			;;
+		--disable-tests)
+			CONFIG_TESTS=n
+			;;
+		--enable-werror)
+			CONFIG_WERROR=y
+			;;
+		--disable-werror)
+			CONFIG_WERROR=n
+			;;
+		--with-env=*)
+			CONFIG_ENV="${i#*=}"
+			;;
+		--with-rbd)
+			CONFIG_RBD=y
+			;;
+		--without-rbd)
+			CONFIG_RBD=n
+			;;
+		--with-rdma)
+			CONFIG_RDMA=y
+			;;
+		--without-rdma)
+			CONFIG_RDMA=n
+			;;
+		--with-iscsi-initiator)
+			CONFIG_ISCSI_INITIATOR=y
+			;;
+		--without-iscsi-initiator)
+			CONFIG_ISCSI_INITIATOR=n
+			;;
+		--with-dpdk=*)
+			check_dir "$i"
+			CONFIG_DPDK_DIR=$(readlink -f ${i#*=})
+			;;
+		--without-dpdk)
+			CONFIG_DPDK_DIR=
+			;;
+		--with-vhost)
+			CONFIG_VHOST=y
+			;;
+		--without-vhost)
+			CONFIG_VHOST=n
+			;;
+		--with-virtio)
+			CONFIG_VIRTIO=y
+			;;
+		--without-virtio)
+			CONFIG_VIRTIO=n
+			;;
+		--with-pmdk)
+			CONFIG_PMDK=y
+			;;
+		--with-pmdk=*)
+			CONFIG_PMDK=y
+			check_dir "$i"
+			CONFIG_PMDK_DIR=$(readlink -f ${i#*=})
+			;;
+		--without-pmdk)
+			CONFIG_PMDK=n
+			;;
+		--with-vpp)
+			CONFIG_VPP=y
+			;;
+		--with-vpp=*)
+			CONFIG_VPP=y
+			check_dir "$i"
+			CONFIG_VPP_DIR=$(readlink -f ${i#*=})
+			;;
+		--without-vpp)
+			CONFIG_VPP=n
+			;;
+		--with-fio=*)
+			check_dir "$i"
+			FIO_SOURCE_DIR="${i#*=}"
+			CONFIG_FIO_PLUGIN=y
+			;;
+		--without-fio)
+			FIO_SOURCE_DIR=
+			CONFIG_FIO_PLUGIN=n
+			;;
+		--with-vtune=*)
+			check_dir "$i"
+			VTUNE_SOURCE_DIR="${i#*=}"
+			CONFIG_VTUNE=y
+			;;
+		--without-vtune)
+			VTUNE_SOURCE_DIR=
+			CONFIG_VTUNE=n
+			;;
+		--)
+			break
+			;;
+		*)
+			echo "Unrecognized option $i"
+			usage
+			exit 1
+	esac
+done
+
+if [ -z "$CONFIG_ENV" ]; then
+	if [ -z "$CONFIG_DPDK_DIR" ]; then
+		rootdir=$(readlink -f $(dirname $0))
+		if [ ! -f "$rootdir"/dpdk/config/common_spdk ]; then
+			echo "DPDK not found; please specify --with-dpdk=<path> or run:"
+			echo
+			echo "  git submodule update --init"
+			exit 1
+		fi
+		CONFIG_DPDK_DIR="$rootdir"/dpdk/build
+	fi
+fi
+
+if [ "$CONFIG_FIO_PLUGIN" = "y" ]; then
+	if [ -z "$FIO_SOURCE_DIR" ]; then
+		echo "When fio is enabled, you must specify the fio directory using --with-fio=path"
+		exit 1
+	fi
+fi
+
+if [ "$CONFIG_VTUNE" = "y" ]; then
+	if [ -z "$VTUNE_SOURCE_DIR" ]; then
+		echo "When VTune is enabled, you must specify the VTune directory using --with-vtune=path"
+		exit 1
+	fi
+fi
+
+if [ "$CONFIG_ASAN" = "y" -a "$CONFIG_TSAN" = "y" ]; then
+	echo "ERROR: ASAN and TSAN cannot be enabled at the same time."
+	exit 1
+fi
+
+if [[ "$OSTYPE" == "FreeBSD"* ]]; then
+	# FreeBSD doesn't support all configurations
+	if [[ "$CONFIG_COVERAGE" == "y" ]]; then
+		echo "ERROR: CONFIG_COVERAGE not available on FreeBSD"
+		exit 1
+	fi
+fi
+
+echo -n "Creating CONFIG.local..."
+
+# Write the configuration file
+rm -f CONFIG.local
+if [ -n "$CONFIG_PREFIX" ]; then
+	echo "CONFIG_PREFIX?=$CONFIG_PREFIX" >> CONFIG.local
+fi
+if [ -n "$CONFIG_DEBUG" ]; then
+	echo "CONFIG_DEBUG?=$CONFIG_DEBUG" >> CONFIG.local
+fi
+if [ -n "$CONFIG_WERROR" ]; then
+	echo "CONFIG_WERROR?=$CONFIG_WERROR" >> CONFIG.local
+fi
+if [ -n "$CONFIG_COVERAGE" ]; then
+	echo "CONFIG_COVERAGE?=$CONFIG_COVERAGE" >> CONFIG.local
+fi
+if [ -n "$CONFIG_LTO" ]; then
+	echo "CONFIG_LTO?=$CONFIG_LTO" >> CONFIG.local
+fi
+if [ -n "$CONFIG_TESTS" ]; then
+	echo "CONFIG_TESTS?=$CONFIG_TESTS" >> CONFIG.local
+fi
+if [ -n "$CONFIG_ASAN" ]; then
+	echo "CONFIG_ASAN?=$CONFIG_ASAN" >> CONFIG.local
+fi
+if [ -n "$CONFIG_UBSAN" ]; then
+	echo "CONFIG_UBSAN?=$CONFIG_UBSAN" >> CONFIG.local
+fi
+if [ -n "$CONFIG_TSAN" ]; then
+	echo "CONFIG_TSAN?=$CONFIG_TSAN" >> CONFIG.local
+fi
+if [ -n "$CONFIG_ENV" ]; then
+	echo "CONFIG_ENV?=$CONFIG_ENV" >> CONFIG.local
+fi
+if [ -n "$CONFIG_DPDK_DIR" ]; then
+	echo "CONFIG_DPDK_DIR?=$CONFIG_DPDK_DIR" >> CONFIG.local
+fi
+if [ -n "$CONFIG_VHOST" ]; then
+	echo "CONFIG_VHOST?=$CONFIG_VHOST" >> CONFIG.local
+fi
+if [ -n "$CONFIG_VIRTIO" ]; then
+	echo "CONFIG_VIRTIO?=$CONFIG_VIRTIO" >> CONFIG.local
+fi
+if [ -n "$CONFIG_PMDK" ]; then
+	echo "CONFIG_PMDK?=$CONFIG_PMDK" >> CONFIG.local
+fi
+if [ -n "$CONFIG_PMDK_DIR" ]; then
+	echo "CONFIG_PMDK_DIR?=$CONFIG_PMDK_DIR" >> CONFIG.local
+fi
+if [ -n "$CONFIG_VPP" ]; then
+	echo "CONFIG_VPP?=$CONFIG_VPP" >> CONFIG.local
+fi
+if [ -n "$CONFIG_VPP_DIR" ]; then
+	echo "CONFIG_VPP_DIR?=$CONFIG_VPP_DIR" >> CONFIG.local
+fi
+if [ -n "$CONFIG_FIO_PLUGIN" ]; then
+	echo "CONFIG_FIO_PLUGIN?=$CONFIG_FIO_PLUGIN" >> CONFIG.local
+fi
+if [ -n "$FIO_SOURCE_DIR" ]; then
+	echo "FIO_SOURCE_DIR?=$FIO_SOURCE_DIR" >> CONFIG.local
+fi
+if [ -n "$CONFIG_RDMA" ]; then
+	echo "CONFIG_RDMA?=$CONFIG_RDMA" >> CONFIG.local
+fi
+if [ -n "$CONFIG_ISCSI_INITIATOR" ]; then
+	echo "CONFIG_ISCSI_INITIATOR?=$CONFIG_ISCSI_INITIATOR" >> CONFIG.local
+fi
+if [ -n "$CONFIG_RBD" ]; then
+	echo "CONFIG_RBD?=$CONFIG_RBD" >> CONFIG.local
+fi
+if [ -n "$CONFIG_VTUNE" ]; then
+	echo "CONFIG_VTUNE?=$CONFIG_VTUNE" >> CONFIG.local
+fi
+if [ -n "$VTUNE_SOURCE_DIR" ]; then
+	echo "VTUNE_SOURCE_DIR?=$VTUNE_SOURCE_DIR" >> CONFIG.local
+fi
+
+# Environment variables
+if [ -n "$CFLAGS" ]; then
+	echo "CFLAGS?=$CFLAGS" >> CONFIG.local
+fi
+if [ -n "$CXXFLAGS" ]; then
+	echo "CXXFLAGS?=$CXXFLAGS" >> CONFIG.local
+fi
+if [ -n "$LDFLAGS" ]; then
+	echo "LDFLAGS?=$LDFLAGS" >> CONFIG.local
+fi
+if [ -n "$DESTDIR" ]; then
+	echo "DESTDIR?=$DESTDIR" >> CONFIG.local
+fi
+
+python_command=
+for interpreter in python3 python2 python ; do
+	type $interpreter > /dev/null 2>&1 || continue
+	python_command=$interpreter
+	break
+done
+if [[ -z "$python_command" ]] ; then
+	echo "Could not find python interpreter! Bailing out."
+	exit 1
+fi
+
+rm -f PYTHON_COMMAND
+echo $python_command > PYTHON_COMMAND
+$python_command scripts/genconfig.py > config.h
+
+echo "done."
+if [[ "$OSTYPE" == "FreeBSD"* ]]; then
+	echo "Type 'gmake' to build."
+else
+	echo "Type 'make' to build."
+fi
+
+exit 0

@@ -1,7 +1,7 @@
 //  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-//  This source code is licensed under the BSD-style license found in the
-//  LICENSE file in the root directory of this source tree. An additional grant
-//  of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 //
 // Copyright (c) 2011 The LevelDB Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -29,6 +29,7 @@ int main() {
 #else
 
 #define __STDC_FORMAT_MACROS
+#include <fcntl.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,6 +43,7 @@ int main() {
 #include "db/db_impl.h"
 #include "db/version_set.h"
 #include "hdfs/env_hdfs.h"
+#include "monitoring/histogram.h"
 #include "port/port.h"
 #include "rocksdb/cache.h"
 #include "rocksdb/env.h"
@@ -53,12 +55,16 @@ int main() {
 #include "util/coding.h"
 #include "util/compression.h"
 #include "util/crc32c.h"
-#include "util/histogram.h"
 #include "util/logging.h"
 #include "util/mutexlock.h"
 #include "util/random.h"
 #include "util/string_util.h"
+// SyncPoint is not supported in Released Windows Mode.
+#if !(defined NDEBUG) || !defined(OS_WIN)
+#include "util/sync_point.h"
+#endif  // !(defined NDEBUG) || !defined(OS_WIN)
 #include "util/testutil.h"
+
 #include "utilities/merge_operators.h"
 
 using GFLAGS::ParseCommandLineFlags;
@@ -269,16 +275,17 @@ DEFINE_string(db, "", "Use the db with the following name.");
 DEFINE_bool(verify_checksum, false,
             "Verify checksum for every block read from storage");
 
-DEFINE_bool(mmap_read, rocksdb::EnvOptions().use_mmap_reads,
+DEFINE_bool(mmap_read, rocksdb::Options().allow_mmap_reads,
             "Allow reads to occur via mmap-ing files");
 
-DEFINE_bool(mmap_write, rocksdb::EnvOptions().use_mmap_writes,
+DEFINE_bool(mmap_write, rocksdb::Options().allow_mmap_writes,
             "Allow writes to occur via mmap-ing files");
 
-DEFINE_bool(use_direct_reads, rocksdb::EnvOptions().use_direct_reads,
+DEFINE_bool(use_direct_reads, rocksdb::Options().use_direct_reads,
             "Use O_DIRECT for reading data");
 
-DEFINE_bool(use_direct_writes, rocksdb::EnvOptions().use_direct_writes,
+DEFINE_bool(use_direct_io_for_flush_and_compaction,
+            rocksdb::Options().use_direct_io_for_flush_and_compaction,
             "Use O_DIRECT for writing data");
 
 // Database statistics
@@ -928,27 +935,23 @@ struct ThreadState {
 
 class DbStressListener : public EventListener {
  public:
-  DbStressListener(
-      const std::string& db_name,
-      const std::vector<DbPath>& db_paths) :
-      db_name_(db_name),
-      db_paths_(db_paths),
-      rand_(301) {}
+  DbStressListener(const std::string& db_name,
+                   const std::vector<DbPath>& db_paths)
+      : db_name_(db_name), db_paths_(db_paths) {}
   virtual ~DbStressListener() {}
 #ifndef ROCKSDB_LITE
-  virtual void OnFlushCompleted(
-      DB* db, const FlushJobInfo& info) override {
+  virtual void OnFlushCompleted(DB* db, const FlushJobInfo& info) override {
     assert(db);
     assert(db->GetName() == db_name_);
     assert(IsValidColumnFamilyName(info.cf_name));
     VerifyFilePath(info.file_path);
     // pretending doing some work here
     std::this_thread::sleep_for(
-        std::chrono::microseconds(rand_.Uniform(5000)));
+        std::chrono::microseconds(Random::GetTLSInstance()->Uniform(5000)));
   }
 
-  virtual void OnCompactionCompleted(
-      DB *db, const CompactionJobInfo& ci) override {
+  virtual void OnCompactionCompleted(DB* db,
+                                     const CompactionJobInfo& ci) override {
     assert(db);
     assert(db->GetName() == db_name_);
     assert(IsValidColumnFamilyName(ci.cf_name));
@@ -961,11 +964,10 @@ class DbStressListener : public EventListener {
     }
     // pretending doing some work here
     std::this_thread::sleep_for(
-        std::chrono::microseconds(rand_.Uniform(5000)));
+        std::chrono::microseconds(Random::GetTLSInstance()->Uniform(5000)));
   }
 
-  virtual void OnTableFileCreated(
-      const TableFileCreationInfo& info) override {
+  virtual void OnTableFileCreated(const TableFileCreationInfo& info) override {
     assert(info.db_name == db_name_);
     assert(IsValidColumnFamilyName(info.cf_name));
     VerifyFilePath(info.file_path);
@@ -1034,7 +1036,6 @@ class DbStressListener : public EventListener {
  private:
   std::string db_name_;
   std::vector<DbPath> db_paths_;
-  Random rand_;
 };
 
 }  // namespace
@@ -1162,6 +1163,8 @@ class StressTest {
              ToString(FLAGS_max_bytes_for_level_multiplier), "1", "2",
          }},
         {"max_sequential_skip_in_iterations", {"4", "8", "12"}},
+        {"use_direct_reads", {"false", "true"}},
+        {"use_direct_io_for_flush_and_compaction", {"false", "true"}},
     };
 
     options_table_ = std::move(options_tbl);
@@ -2156,7 +2159,8 @@ class StressTest {
     options_.allow_mmap_reads = FLAGS_mmap_read;
     options_.allow_mmap_writes = FLAGS_mmap_write;
     options_.use_direct_reads = FLAGS_use_direct_reads;
-    options_.use_direct_writes = FLAGS_use_direct_writes;
+    options_.use_direct_io_for_flush_and_compaction =
+        FLAGS_use_direct_io_for_flush_and_compaction;
     options_.target_file_size_base = FLAGS_target_file_size_base;
     options_.target_file_size_multiplier = FLAGS_target_file_size_multiplier;
     options_.max_bytes_for_level_base = FLAGS_max_bytes_for_level_base;
@@ -2348,6 +2352,20 @@ int main(int argc, char** argv) {
   SetUsageMessage(std::string("\nUSAGE:\n") + std::string(argv[0]) +
                   " [OPTIONS]...");
   ParseCommandLineFlags(&argc, &argv, true);
+#if !defined(NDEBUG) && !defined(OS_MACOSX) && !defined(OS_WIN) && \
+  !defined(OS_SOLARIS) && !defined(OS_AIX)
+  rocksdb::SyncPoint::GetInstance()->SetCallBack(
+    "NewWritableFile:O_DIRECT", [&](void* arg) {
+      int* val = static_cast<int*>(arg);
+      *val &= ~O_DIRECT;
+    });
+  rocksdb::SyncPoint::GetInstance()->SetCallBack(
+    "NewRandomAccessFile:O_DIRECT", [&](void* arg) {
+      int* val = static_cast<int*>(arg);
+      *val &= ~O_DIRECT;
+    });
+  rocksdb::SyncPoint::GetInstance()->EnableProcessing();
+#endif
 
   if (FLAGS_statistics) {
     dbstats = rocksdb::CreateDBStatistics();

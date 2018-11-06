@@ -1,7 +1,7 @@
 // Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-// This source code is licensed under the BSD-style license found in the
-// LICENSE file in the root directory of this source tree. An additional grant
-// of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 // Copyright (c) 2011 The LevelDB Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
@@ -136,7 +136,7 @@ struct ColumnFamilyOptions : public AdvancedColumnFamilyOptions {
   // the same DB. The only exception is reserved for upgrade, where a DB
   // previously without a merge operator is introduced to Merge operation
   // for the first time. It's necessary to specify a merge operator when
-  // openning the DB in this case.
+  // opening the DB in this case.
   // Default: nullptr
   std::shared_ptr<MergeOperator> merge_operator = nullptr;
 
@@ -412,6 +412,8 @@ struct DBOptions {
   // This parameter should be set to true while storing data to
   // filesystem like ext3 that can lose files after a reboot.
   // Default: false
+  // Note: on many platforms fdatasync is defined as fsync, so this parameter
+  // would make no difference. Refer to fdatasync definition in this code base.
   bool use_fsync = false;
 
   // A list of paths where SST files can be put into, with its target size.
@@ -461,24 +463,27 @@ struct DBOptions {
   // regardless of this setting
   uint64_t delete_obsolete_files_period_micros = 6ULL * 60 * 60 * 1000000;
 
-  // Suggested number of concurrent background compaction jobs, submitted to
-  // the default LOW priority thread pool.
-  //
-  // Default: 1
-  int base_background_compactions = 1;
+  // Maximum number of concurrent background jobs (compactions and flushes).
+  int max_background_jobs = 2;
 
+  // NOT SUPPORTED ANYMORE: RocksDB automatically decides this based on the
+  // value of max_background_jobs. This option is ignored.
+  int base_background_compactions = -1;
+
+  // NOT SUPPORTED ANYMORE: RocksDB automatically decides this based on the
+  // value of max_background_jobs. For backwards compatibility we will set
+  // `max_background_jobs = max_background_compactions + max_background_flushes`
+  // in the case where user sets at least one of `max_background_compactions` or
+  // `max_background_flushes` (we replace -1 by 1 in case one option is unset).
+  //
   // Maximum number of concurrent background compaction jobs, submitted to
   // the default LOW priority thread pool.
-  // We first try to schedule compactions based on
-  // `base_background_compactions`. If the compaction cannot catch up , we
-  // will increase number of compaction threads up to
-  // `max_background_compactions`.
   //
   // If you're increasing this, also consider increasing number of threads in
   // LOW priority thread pool. For more information, see
   // Env::SetBackgroundThreads
-  // Default: 1
-  int max_background_compactions = 1;
+  // Default: -1
+  int max_background_compactions = -1;
 
   // This value represents the maximum number of threads that will
   // concurrently perform a compaction job by breaking it into multiple,
@@ -486,22 +491,27 @@ struct DBOptions {
   // Default: 1 (i.e. no subcompactions)
   uint32_t max_subcompactions = 1;
 
-  // Maximum number of concurrent background memtable flush jobs, submitted to
-  // the HIGH priority thread pool.
+  // NOT SUPPORTED ANYMORE: RocksDB automatically decides this based on the
+  // value of max_background_jobs. For backwards compatibility we will set
+  // `max_background_jobs = max_background_compactions + max_background_flushes`
+  // in the case where user sets at least one of `max_background_compactions` or
+  // `max_background_flushes`.
   //
-  // By default, all background jobs (major compaction and memtable flush) go
-  // to the LOW priority pool. If this option is set to a positive number,
-  // memtable flush jobs will be submitted to the HIGH priority pool.
-  // It is important when the same Env is shared by multiple db instances.
-  // Without a separate pool, long running major compaction jobs could
-  // potentially block memtable flush jobs of other db instances, leading to
-  // unnecessary Put stalls.
+  // Maximum number of concurrent background memtable flush jobs, submitted by
+  // default to the HIGH priority thread pool. If the HIGH priority thread pool
+  // is configured to have zero threads, flush jobs will share the LOW priority
+  // thread pool with compaction jobs.
+  //
+  // It is important to use both thread pools when the same Env is shared by
+  // multiple db instances. Without a separate pool, long running compaction
+  // jobs could potentially block memtable flush jobs of other db instances,
+  // leading to unnecessary Put stalls.
   //
   // If you're increasing this, also consider increasing number of threads in
   // HIGH priority thread pool. For more information, see
   // Env::SetBackgroundThreads
-  // Default: 1
-  int max_background_flushes = 1;
+  // Default: -1
+  int max_background_flushes = -1;
 
   // Specify the maximal size of the info log file. If the log file
   // is larger than `max_log_file_size`, a new info log file will
@@ -539,7 +549,7 @@ struct DBOptions {
   // Number of shards used for table cache.
   int table_cache_numshardbits = 6;
 
-  // DEPRECATED
+  // NOT SUPPORTED ANYMORE
   // int table_cache_remove_scan_count_limit;
 
   // The following two fields affect how archived logs will be deleted.
@@ -576,18 +586,19 @@ struct DBOptions {
   //
   // Files will be opened in "direct I/O" mode
   // which means that data r/w from the disk will not be cached or
-  // bufferized. The hardware buffer of the devices may however still
+  // buffered. The hardware buffer of the devices may however still
   // be used. Memory mapped files are not impacted by these parameters.
 
-  // Use O_DIRECT for reading file
+  // Use O_DIRECT for user reads
   // Default: false
   // Not supported in ROCKSDB_LITE mode!
   bool use_direct_reads = false;
 
-  // Use O_DIRECT for writing file
+  // Use O_DIRECT for both reads and writes in background flush and compactions
+  // When true, we also force new_table_reader_for_compaction_inputs to true.
   // Default: false
   // Not supported in ROCKSDB_LITE mode!
-  bool use_direct_writes = false;
+  bool use_direct_io_for_flush_and_compaction = false;
 
   // If false, fallocate() calls are bypassed
   bool allow_fallocate = true;
@@ -595,7 +606,7 @@ struct DBOptions {
   // Disable child process inherit open files. Default: true
   bool is_fd_close_on_exec = true;
 
-  // DEPRECATED -- this options is no longer used
+  // NOT SUPPORTED ANYMORE -- this options is no longer used
   bool skip_log_error_on_recovery = false;
 
   // if not zero, dump rocksdb.stats to LOG every stats_dump_period_sec
@@ -687,7 +698,9 @@ struct DBOptions {
 
   // This is the maximum buffer size that is used by WritableFileWriter.
   // On Windows, we need to maintain an aligned buffer for writes.
-  // We allow the buffer to grow until it's size hits the limit.
+  // We allow the buffer to grow until it's size hits the limit in buffered
+  // IO and fix the buffer size when using direct IO to ensure alignment of
+  // write requests if the logical sector size is unusual
   //
   // Default: 1024 * 1024 (1 MB)
   size_t writable_file_max_buffer_size = 1024 * 1024;
@@ -741,10 +754,30 @@ struct DBOptions {
   // calculated using size of user write requests before compression.
   // RocksDB may decide to slow down more if the compaction still
   // gets behind further.
+  // If the value is 0, we will infer a value from `rater_limiter` value
+  // if it is not empty, or 16MB if `rater_limiter` is empty. Note that
+  // if users change the rate in `rate_limiter` after DB is opened,
+  // `delayed_write_rate` won't be adjusted.
+  //
   // Unit: byte per second.
   //
-  // Default: 16MB/s
-  uint64_t delayed_write_rate = 16 * 1024U * 1024U;
+  // Default: 0
+  uint64_t delayed_write_rate = 0;
+
+  // By default, a single write thread queue is maintained. The thread gets
+  // to the head of the queue becomes write batch group leader and responsible
+  // for writing to WAL and memtable for the batch group.
+  //
+  // If enable_pipelined_write is true, separate write thread queue is
+  // maintained for WAL write and memtable write. A write thread first enter WAL
+  // writer queue and then memtable writer queue. Pending thread on the WAL
+  // writer queue thus only have to wait for previous writers to finish their
+  // WAL writing but not the memtable writing. Enabling the feature may improve
+  // write throughput and reduce latency of the prepare phase of two-phase
+  // commit.
+  //
+  // Default: false
+  bool enable_pipelined_write = false;
 
   // If true, allow multi-writers to update mem tables in parallel.
   // Only some memtable_factory-s support concurrent writes; currently it
@@ -842,6 +875,18 @@ struct DBOptions {
   //
   // Dynamically changeable through SetDBOptions() API.
   bool avoid_flush_during_shutdown = false;
+
+  // Set this option to true during creation of database if you want
+  // to be able to ingest behind (call IngestExternalFile() skipping keys
+  // that already exist, rather than overwriting matching keys).
+  // Setting this option to true will affect 2 things:
+  // 1) Disable some internal optimizations around SST file compression
+  // 2) Reserve bottom-most level for ingested files only.
+  // 3) Note that num_levels should be >= 3 if this option is turned on.
+  //
+  // DEFAULT: false
+  // Immutable.
+  bool allow_ingest_behind = false;
 };
 
 // Options to control the behavior of a database (passed to DB::Open)
@@ -897,6 +942,43 @@ enum ReadTier {
 
 // Options that control read operations
 struct ReadOptions {
+  // If "snapshot" is non-nullptr, read as of the supplied snapshot
+  // (which must belong to the DB that is being read and which must
+  // not have been released).  If "snapshot" is nullptr, use an implicit
+  // snapshot of the state at the beginning of this read operation.
+  // Default: nullptr
+  const Snapshot* snapshot;
+
+  // "iterate_upper_bound" defines the extent upto which the forward iterator
+  // can returns entries. Once the bound is reached, Valid() will be false.
+  // "iterate_upper_bound" is exclusive ie the bound value is
+  // not a valid entry.  If iterator_extractor is not null, the Seek target
+  // and iterator_upper_bound need to have the same prefix.
+  // This is because ordering is not guaranteed outside of prefix domain.
+  // There is no lower bound on the iterator. If needed, that can be easily
+  // implemented.
+  //
+  // Default: nullptr
+  const Slice* iterate_upper_bound;
+
+  // If non-zero, NewIterator will create a new table reader which
+  // performs reads of the given size. Using a large size (> 2MB) can
+  // improve the performance of forward iteration on spinning disks.
+  // Default: 0
+  size_t readahead_size;
+
+  // A threshold for the number of keys that can be skipped before failing an
+  // iterator seek as incomplete. The default value of 0 should be used to
+  // never fail a request as incomplete, even on skipping too many keys.
+  // Default: 0
+  uint64_t max_skippable_internal_keys;
+
+  // Specify if this read request should process data that ALREADY
+  // resides on a particular cache. If the required data is not
+  // found at the specified cache, then Status::Incomplete is returned.
+  // Default: kReadAllTier
+  ReadTier read_tier;
+
   // If true, all data read from underlying storage will be
   // verified against corresponding checksums.
   // Default: true
@@ -907,53 +989,6 @@ struct ReadOptions {
   // Callers may wish to set this field to false for bulk scans.
   // Default: true
   bool fill_cache;
-
-  // If this option is set and memtable implementation allows, Seek
-  // might only return keys with the same prefix as the seek-key
-  //
-  // ! DEPRECATED: prefix_seek is on by default when prefix_extractor
-  // is configured
-  // bool prefix_seek;
-
-  // If "snapshot" is non-nullptr, read as of the supplied snapshot
-  // (which must belong to the DB that is being read and which must
-  // not have been released).  If "snapshot" is nullptr, use an implicit
-  // snapshot of the state at the beginning of this read operation.
-  // Default: nullptr
-  const Snapshot* snapshot;
-
-  // If "prefix" is non-nullptr, and ReadOptions is being passed to
-  // db.NewIterator, only return results when the key begins with this
-  // prefix.  This field is ignored by other calls (e.g., Get).
-  // Options.prefix_extractor must also be set, and
-  // prefix_extractor.InRange(prefix) must be true.  The iterator
-  // returned by NewIterator when this option is set will behave just
-  // as if the underlying store did not contain any non-matching keys,
-  // with two exceptions.  Seek() only accepts keys starting with the
-  // prefix, and SeekToLast() is not supported.  prefix filter with this
-  // option will sometimes reduce the number of read IOPs.
-  // Default: nullptr
-  //
-  // ! DEPRECATED
-  // const Slice* prefix;
-
-  // "iterate_upper_bound" defines the extent upto which the forward iterator
-  // can returns entries. Once the bound is reached, Valid() will be false.
-  // "iterate_upper_bound" is exclusive ie the bound value is
-  // not a valid entry.  If iterator_extractor is not null, the Seek target
-  // and iterator_upper_bound need to have the same prefix.
-  // This is because ordering is not guaranteed outside of prefix domain.
-  // There is no lower bound on the iterator. If needed, that can be easily
-  // implemented
-  //
-  // Default: nullptr
-  const Slice* iterate_upper_bound;
-
-  // Specify if this read request should process data that ALREADY
-  // resides on a particular cache. If the required data is not
-  // found at the specified cache, then Status::Incomplete is returned.
-  // Default: kReadAllTier
-  ReadTier read_tier;
 
   // Specify to create a tailing iterator -- a special iterator that has a
   // view of the complete database (i.e. it can also be used to read newly
@@ -1000,12 +1035,6 @@ struct ReadOptions {
   // Default: false
   bool background_purge_on_iterator_cleanup;
 
-  // If non-zero, NewIterator will create a new table reader which
-  // performs reads of the given size. Using a large size (> 2MB) can
-  // improve the performance of forward iteration on spinning disks.
-  // Default: 0
-  size_t readahead_size;
-
   // If true, keys deleted using the DeleteRange() API will be visible to
   // readers until they are naturally deleted during compaction. This improves
   // read performance in DBs with many range deletions.
@@ -1050,11 +1079,21 @@ struct WriteOptions {
   // immediately with Status::Incomplete().
   bool no_slowdown;
 
+  // If true, this write request is of lower priority if compaction is
+  // behind. In this case, no_slowdown = true, the request will be cancelled
+  // immediately with Status::Incomplete() returned. Otherwise, it will be
+  // slowed down. The slowdown value is determined by RocksDB to guarantee
+  // it introduces minimum impacts to high priority writes.
+  //
+  // Default: false
+  bool low_pri;
+
   WriteOptions()
       : sync(false),
         disableWAL(false),
         ignore_missing_column_families(false),
-        no_slowdown(false) {}
+        no_slowdown(false),
+        low_pri(false) {}
 };
 
 // Options that control flush operations
@@ -1130,6 +1169,14 @@ struct IngestExternalFileOptions {
   // If set to false and the file key range overlaps with the memtable key range
   // (memtable flush required), IngestExternalFile will fail.
   bool allow_blocking_flush = true;
+  // Set to true if you would like duplicate keys in the file being ingested
+  // to be skipped rather than overwriting existing data under that key.
+  // Usecase: back-fill of some historical data in the database without
+  // over-writing existing newer version of data.
+  // This option could only be used if the DB has been running
+  // with allow_ingest_behind=true since the dawn of time.
+  // All files will be ingested at the bottommost level with seqno=0.
+  bool ingest_behind = false;
 };
 
 }  // namespace rocksdb

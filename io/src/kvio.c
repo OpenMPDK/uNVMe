@@ -49,6 +49,7 @@
 #include "kvconfig_nxx.h"
 
 #undef USE_ITERATE_PREPATCH
+#define GENERAL_KV_SSD
 
 extern  kv_sdk g_sdk;
 
@@ -91,6 +92,7 @@ int _kv_check_op_param(uint64_t handle, kv_pair* dst, int op_types){
                 return KV_ERR_SDK_INVALID_PARAM;
         }
 
+	/* disable due to supporting zero-value
         if(op_types!=op_delete && op_types!=op_exist){
                 if(!dst->value.value){
                         fprintf(stderr, "[%s] Invalid Parameter \n", _op_name[op_types]);
@@ -99,25 +101,27 @@ int _kv_check_op_param(uint64_t handle, kv_pair* dst, int op_types){
         } else {
 		return KV_SUCCESS;
 	}
+	*/
 
         if (op_types == op_store && g_sdk.ssd_type == KV_TYPE_SSD){
-                max_sdk_support_length = KV_MAX_STORE_VALUE_LEN;
+                max_sdk_support_length = KV_MAX_IO_VALUE_LEN;
         } else {
-                max_sdk_support_length = KV_MAX_VALUE_LEN;
+                max_sdk_support_length = LBA_MAX_IO_VALUE_LEN;
         }
 
         if((dst->value.length > max_sdk_support_length)||(dst->value.length < KV_MIN_VALUE_LEN)){
                 fprintf(stderr, "[%s] value length should be from %u to %u (Value length: %u) \n", _op_name[op_types], KV_MIN_VALUE_LEN, max_sdk_support_length, dst->value.length);
                 return KV_ERR_INVALID_VALUE_SIZE;
         }
-        if(dst->value.length % KV_ALIGNMENT_UNIT){
-                fprintf(stderr, "[%s] Value length should be multiple of %u (Value length: %u) \n", _op_name[op_types], KV_ALIGNMENT_UNIT, dst->value.length);
-                return KV_ERR_MISALIGNED_VALUE_SIZE;
-        }
 
 	if(g_sdk.ssd_type == KV_TYPE_SSD && dst->keyspace_id != KV_KEYSPACE_IODATA && dst->keyspace_id != KV_KEYSPACE_METADATA){
 		fprintf(stderr,"[%s] keyspace should be KV_KEYSPACE_IODATA or KV_KEYSPACE_METADATA\n dst->keyspace_id=%d",__FUNCTION__, dst->keyspace_id);
-		return KV_ERR_SDK_INVALID_PARAM;
+		return KV_ERR_INVALID_KEYSPACE_ID;
+	}
+
+	if(g_sdk.ssd_type == KV_TYPE_SSD && (dst->key.length < KV_MIN_KEY_LEN || dst->key.length > KV_MAX_KEY_LEN)){
+		fprintf(stderr,"[%s] key length shoud be ranged from %d to %d\n", __FUNCTION__, KV_MIN_KEY_LEN, KV_MAX_KEY_LEN);
+		return KV_ERR_INVALID_KEY_SIZE;
 	}
 
         return KV_SUCCESS;
@@ -141,6 +145,8 @@ static void sdk_async_store_cb(kv_pair* kv, unsigned int result, unsigned int st
         void (*async_cb)() = param->user_async_cb;
         dst->param.private_data = param->user_private_data;
 	dst->keyspace_id = io_kv->keyspace_id;
+	dst->value.length = io_kv->value.length;
+	dst->value.actual_value_size = io_kv->value.actual_value_size;
 
         if(status == KV_SUCCESS){
                 if(g_sdk.use_cache){
@@ -248,6 +254,8 @@ int _kv_store(uint64_t handle, kv_pair* dst){
 			ret = kv_nvme_write(handle, qid, io_kv);
 		}
 	}
+	dst->value.length = io_kv->value.length;
+	dst->value.actual_value_size = io_kv->value.actual_value_size;
 
 	log_debug(KV_LOG_DEBUG, "[kv_nvme_write] ret=%d key=%s\n",ret, dst->key.key);
 
@@ -348,7 +356,8 @@ static void sdk_async_retrieve_cb(kv_pair* kv, unsigned int result, unsigned int
 
         if(status == KV_SUCCESS){
 		if(g_sdk.ssd_type == KV_TYPE_SSD){
-			dst->value.length = result;
+			dst->value.length = io_kv->value.length;
+			dst->value.actual_value_size = io_kv->value.actual_value_size;
 		}
                 memcpy(dst->value.value, io_kv->value.value, dst->value.length);
                 dst->value.offset = io_kv->value.offset;
@@ -415,7 +424,10 @@ int _kv_retrieve(uint64_t handle, kv_pair* dst){
 	}
 
 	dst->keyspace_id = io_kv->keyspace_id;
-	dst->value.length = io_kv->value.length;
+	if(g_sdk.ssd_type == KV_TYPE_SSD){
+		dst->value.length = io_kv->value.length;
+		dst->value.actual_value_size = io_kv->value.actual_value_size;
+	}
 	memcpy(dst->value.value, io_kv->value.value, dst->value.length);
 	dst->value.offset = io_kv->value.offset;
 
@@ -873,6 +885,15 @@ static void sdk_async_iterate_read_cb(kv_iterate* it, unsigned int result, unsig
 	}
 
 #else
+
+#ifdef GENERAL_KV_SSD
+	dst->kv.key.length = io_it->kv.key.length; //would be 0
+	dst->kv.value.length = io_it->kv.value.length;
+	dst->kv.value.offset = io_it->kv.value.offset;
+	if(dst->kv.value.length > 0 && dst->kv.value.value != NULL){
+		memcpy(dst->kv.value.value, io_it->kv.value.value, dst->kv.value.length);
+	}
+#else
 	dst->kv.key.length = io_it->kv.key.length;
 	if(dst->kv.key.length > 0 && dst->kv.key.key != NULL){
 		memcpy(dst->kv.key.key, io_it->kv.value.value, dst->kv.key.length);
@@ -889,7 +910,7 @@ static void sdk_async_iterate_read_cb(kv_iterate* it, unsigned int result, unsig
 			memcpy(dst->kv.value.value, io_it->kv.value.value, dst->kv.value.length);
 		}
 	}
-
+#endif
 	log_debug(KV_LOG_DEBUG, "[%s] status=%d iterator=%d dst->kv.key.length=%d dst->kv.value.length=%d dst->value.value=%llx\n", __FUNCTION__, status, dst->iterator, dst->kv.key.length, dst->kv.value.length, dst->kv.value.value);
 #endif
 	

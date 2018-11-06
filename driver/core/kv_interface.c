@@ -174,7 +174,7 @@ kv_nvme_cpl_t *kv_nvme_submit_raw_cmd(uint64_t handle, kv_nvme_cmd_t cmd, void *
 	return cpl;
 }
 
-int kv_nvme_append(uint64_t handle, int qid, const kv_pair *kv) {
+int kv_nvme_append(uint64_t handle, int qid, kv_pair *kv) {
 	int ret = KV_ERR_DD_INVALID_PARAM;
 	unsigned int queue_is_async = 0;
 	kv_nvme_t *nvme = NULL;
@@ -213,7 +213,7 @@ int kv_nvme_append(uint64_t handle, int qid, const kv_pair *kv) {
 	return ret;
 }
 
-int kv_nvme_write(uint64_t handle, int qid, const kv_pair *kv) {
+int kv_nvme_write(uint64_t handle, int qid, kv_pair *kv) {
 	int ret = KV_ERR_DD_INVALID_PARAM;
 	unsigned int queue_is_async = 0;
 	kv_nvme_t *nvme = NULL;
@@ -253,7 +253,7 @@ int kv_nvme_write(uint64_t handle, int qid, const kv_pair *kv) {
 }
 
 
-int kv_nvme_write_async(uint64_t handle, int qid, const kv_pair *kv) {
+int kv_nvme_write_async(uint64_t handle, int qid, kv_pair *kv) {
 	int ret = KV_ERR_DD_INVALID_PARAM;
 	unsigned int queue_is_sync = 0;
 	kv_nvme_t *nvme = NULL;
@@ -557,12 +557,6 @@ uint32_t kv_nvme_iterate_open(uint64_t handle, uint8_t keyspace_id, uint32_t bit
 		return ret;
 	}
 	
-	if(iterate_type != KV_KEY_ITERATE && iterate_type != KV_KEY_ITERATE_WITH_RETRIEVE && iterate_type != KV_KEY_ITERATE_WITH_DELETE){
-		KVNVME_ERR("Invalid iterate type");
-		LEAVE();
-		return ret;
-	}
-
 	if(keyspace_id != KV_KEYSPACE_IODATA && keyspace_id != KV_KEYSPACE_METADATA){
 		KVNVME_ERR("Invalid keyspace id");
 		LEAVE();
@@ -698,64 +692,6 @@ int kv_nvme_iterate_read_async(uint64_t handle, int qid, kv_iterate* it) {
 
 	LEAVE();
 	return ret;
-}
-
-int kv_nvme_iterate_info(uint64_t handle, kv_iterate_handle_info* info, int nr_handle) {
-        int ret = KV_ERR_DD_INVALID_PARAM;
-        int handle_info_size = 16;
-        int log_id = 0xd0;
-        char logbuf[512];
-        int i;
-
-        ENTER();
-
-        if(!handle || !info || nr_handle <= 0|| nr_handle > KV_MAX_ITERATE_HANDLE){
-                KVNVME_ERR("Invalid paramter ");
-                LEAVE();
-                return ret;
-        }
-
-        memset(logbuf,0,sizeof(logbuf));
-        ret = kv_nvme_get_log_page(handle, log_id, logbuf, sizeof(logbuf));
-        if(ret != KV_SUCCESS){
-                ret = KV_ERR_IO;
-                return ret;
-        }
-
-        int offset = 0;
-
-        /* FIXED FORMAT */
-        for(i=0;i<nr_handle;i++){
-                offset = (i*handle_info_size);
-                info[i].handle_id = (*(uint8_t*)(logbuf + offset + 0));
-                info[i].status = (*(uint8_t*)(logbuf + offset + 1));
-                info[i].type = (*(uint8_t*)(logbuf + offset + 2));
-                info[i].keyspace_id = (*(uint8_t*)(logbuf + offset + 3));
-
-                info[i].prefix = (*(uint32_t*)(logbuf + offset + 4));
-                info[i].bitmask = (*(uint32_t*)(logbuf + offset + 8));
-		info[i].is_eof = (*(uint8_t*)(logbuf + offset + 12));
-                info[i].reserved[0] = (*(uint8_t*)(logbuf + offset + 13));
-                info[i].reserved[1] = (*(uint8_t*)(logbuf + offset + 14));
-                info[i].reserved[2] = (*(uint8_t*)(logbuf + offset + 15));
-                KVNVME_DEBUG("handle_id=%d status=%d type=%d prefix=%08x bitmask=%08x is_eof=%d\n",
-                        info[i].handle_id, info[i].status, info[i].type, info[i].prefix, info[i].bitmask, info[i].is_eof);
-        }
-
-        /*
-        for(i=0;i<*nr_handle;i++){
-                offset += (i*handle_info_size);
-                info[i].handle_id = (*(uint8_t*)(logbuf + offset + 0));
-                info[i].status = (*(uint8_t*)(logbuf + offset + 4));
-                info[i].prefix = (*(uint32_t*)(logbuf + offset + 8));
-                info[i].bitmask = (*(uint32_t*)(logbuf + offset + 12));
-                KVNVME_DEBUG("handle_id=%d status=%d prefix=%08x bitmask=%08x\n",
-                        info[i].handle_id, info[i].status, info[i].prefix, info[i].bitmask);
-        }
-        */
-
-        LEAVE();
-        return ret;
 }
 
 int kv_nvme_format(uint64_t handle, int erase_user_data){

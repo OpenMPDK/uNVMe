@@ -53,7 +53,7 @@ compression_max_dict_bytes=${COMPRESSION_MAX_DICT_BYTES:-0}
 compression_type=${COMPRESSION_TYPE:-snappy}
 duration=${DURATION:-0}
 
-num_keys=${NUM_KEYS:-$((1 * G))}
+num_keys=${NUM_KEYS:-$((100 * M))}
 key_size=${KEY_SIZE:-20}
 value_size=${VALUE_SIZE:-400}
 block_size=${BLOCK_SIZE:-8192}
@@ -64,6 +64,9 @@ const_params="
   \
   --num=$num_keys \
   --num_levels=6 \
+  --mpdk=lba_sdk_config.json \
+  --spdk_bdev=unvme_bdev0n1 \
+  --spdk_cache_size=4096 \
   --key_size=$key_size \
   --value_size=$value_size \
   --block_size=$block_size \
@@ -86,7 +89,6 @@ const_params="
   \
   --verify_checksum=1 \
   --delete_obsolete_files_period_micros=$((60 * M)) \
-  --max_grandparent_overlap_factor=8 \
   --max_bytes_for_level_multiplier=8 \
   \
   --statistics=0 \
@@ -228,7 +230,6 @@ function run_manual_compaction_worker {
        --sync=0 \
        $extra_params \
        --threads=$num_threads \
-       --compaction_measure_io_stats=$1 \
        --compaction_style=$2 \
        --subcompactions=$3 \
        --memtablerep=vector \
@@ -254,7 +255,6 @@ function run_manual_compaction_worker {
        --sync=0 \
        $extra_params \
        --threads=$num_threads \
-       --compaction_measure_io_stats=$1 \
        --compaction_style=$2 \
        --subcompactions=$3 \
        --max_background_compactions=$4 \

@@ -33,10 +33,11 @@
 
 ifeq ($(KV_DIR),)
 export KV_DIR = $(shell pwd)/../../
-DPDK_DIR := $(abspath $(KV_DIR)/driver/external/dpdk)
 endif
 
-SPDK_ROOT_DIR := $(abspath $(KV_DIR)/driver/external/spdk)
+include $(KV_DIR)/mk/unvme.mk
+
+SPDK_ROOT_DIR := $(abspath $(KV_DIR)/driver/external/$(SPDK_PATH))
 include $(SPDK_ROOT_DIR)/mk/spdk.common.mk
 include $(SPDK_ROOT_DIR)/mk/spdk.app.mk
 include $(SPDK_ROOT_DIR)/mk/spdk.modules.mk
@@ -44,9 +45,9 @@ include $(SPDK_ROOT_DIR)/mk/spdk.modules.mk
 APP = mkfs
 
 C_SRCS := mkfs.c
-CFLAGS += $(DPDK_INC)
 
-SPDK_LIB_LIST = blobfs blob bdev blob_bdev copy event util conf trace \
+SPDK_LIB_LIST = event_bdev event_copy
+SPDK_LIB_LIST += blobfs blob bdev blob_bdev copy event util conf trace \
 		log jsonrpc json rpc
 
 LIBS += $(COPY_MODULES_LINKER_ARGS) $(BLOCKDEV_MODULES_LINKER_ARGS)

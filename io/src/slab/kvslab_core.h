@@ -67,8 +67,8 @@ typedef int kvsl_rstatus_t; /* return type */
 #define KVSLAB_SLAB_MEMORY      (64 * MB)
 #define KVSLAB_SLABCLASS_MAX_IDS       UCHAR_MAX
 
-#define HUGEPAGE_SIZE (2ULL*1024*1024)
-#define MAX_NUM_SLAB_CLASS (8)
+#define HUGEPAGE_SIZE (4ULL*1024*1024)
+#define MAX_NUM_SLAB_CLASS (11)
 #define MIN_TOTAL_SLAB_SIZE (HUGEPAGE_SIZE*MAX_NUM_SLAB_CLASS)
 
 struct kvsl_settings {

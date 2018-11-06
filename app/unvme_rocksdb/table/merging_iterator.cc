@@ -1,7 +1,7 @@
 //  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-//  This source code is licensed under the BSD-style license found in the
-//  LICENSE file in the root directory of this source tree. An additional grant
-//  of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 //
 // Copyright (c) 2011 The LevelDB Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 #include "db/pinned_iterators_manager.h"
+#include "monitoring/perf_context_imp.h"
 #include "rocksdb/comparator.h"
 #include "rocksdb/iterator.h"
 #include "rocksdb/options.h"
@@ -20,7 +21,6 @@
 #include "util/arena.h"
 #include "util/autovector.h"
 #include "util/heap.h"
-#include "util/perf_context_imp.h"
 #include "util/stop_watch.h"
 #include "util/sync_point.h"
 

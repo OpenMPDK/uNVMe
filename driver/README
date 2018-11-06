@@ -17,7 +17,7 @@ $ make install
 
 3. Build DPDK
 ==========
-cd dpdk/
+cd dpdk-18.05
 make install T=x86_64-native-linuxapp-gcc EXTRA_CFLAGS="-fPIC" DESTDIR=. V=99
 
 to build DPDK without -fPIC
@@ -28,11 +28,9 @@ make install T=i686-native-linuxapp-gcc EXTRA_CFLAGS="-fPIC" DESTDIR=.
 
 4. Build SPDK
 ==========
-cd ../spdk/
-make DPDK_DIR=../dpdk/x86_64-native-linuxapp-gcc
-
-OR to make use of dkdk-17.11
-make DPDK_DIR=../dpdk-17.11/x86_64-native-linuxapp-gcc
+cd spdk-18.04.1
+./configure --with-dpdk=../dpdk-18.05
+make
 
 
 =================================================================================

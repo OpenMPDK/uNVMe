@@ -53,8 +53,7 @@ int g_nr_it_handle = 1;
 int nthreads = 0;
 int nr_handle = 0;
 
-uint8_t iterate_type = KV_KEY_ITERATE_WITH_RETRIEVE;
-//uint8_t iterate_type = KV_KEY_ITERATE;
+uint8_t iterate_type = KV_KEY_ITERATE;
 
 int start_point;
 int key_length = 16;
@@ -76,6 +75,7 @@ void myalarm() {
 }
 
 void async_iterate_read_cb(kv_iterate* it, unsigned int result, unsigned int status) {
+	int cur_num_read_key = 0;
 	if (!it) {
 		fprintf(stdout, "%s fails: kv_iterate is NULL\n", __FUNCTION__);
 		exit(1);
@@ -106,7 +106,8 @@ void async_iterate_read_cb(kv_iterate* it, unsigned int result, unsigned int sta
 	pthread_mutex_lock(&g_mutex_eof_flag[stamp->tid]);
 	if (it->kv.value.length > 0) {
 		if(it->kv.key.length == 0) {
-			g_num_read_key[stamp->tid] += it->kv.value.length / 16;
+			memcpy(&cur_num_read_key, it->kv.value.value, KV_IT_READ_BUFFER_META_LEN);
+			g_num_read_key[stamp->tid] += cur_num_read_key;
 		} else {
 			g_num_read_key[stamp->tid]++;
 		}
@@ -145,10 +146,10 @@ void prepare_app_memory(int nthreads) {
 		fail_unless(kv[i] != NULL);
 
 		kv[i]->keyspace_id = KV_KEYSPACE_IODATA;
-		kv[i]->key.key = malloc(key_length + 1);
+		kv[i]->key.key = malloc(key_length);
 		fail_unless(kv[i]->key.key != NULL);
 		kv[i]->key.length = key_length;
-		memset(kv[i]->key.key, 0, key_length + 1);
+		memset(kv[i]->key.key, 0, key_length);
 
 		kv[i]->value.value = malloc(value_size); //for retrieve appended kv pair
 		fail_unless(kv[i]->value.value != NULL);
@@ -241,7 +242,9 @@ void* sdk_write(void* data) {
 	fprintf(stderr, "[cid=%d][tid=%d][handle=%lu]kv_store_async: ", core_id, tid, handle);
 	//prepare
 	for (i = 0 + (tid * insert_count); i < insert_count + (tid * insert_count); i++) {
-		sprintf(kv[i]->key.key, "%04x%012x", tid, i + start_point);
+		int tmp_key = i + (start_point * g_nr_it_handle);
+		memset(kv[i]->key.key, 0, key_length);
+		memcpy(kv[i]->key.key + ((size_t)key_length > sizeof(int) ? (key_length - sizeof(i)) : 0), &tmp_key, MIN((size_t)key_length, sizeof(int)));
 		kv[i]->param.async_cb = async_store_cb;
 		kv[i]->param.io_option.store_option = KV_STORE_DEFAULT;
 		((time_stamp *) kv[i]->param.private_data)->tid = tid;
@@ -279,14 +282,12 @@ void* sdk_iterate(void* data) {
 	uint32_t bitmask = 0xFFFFFFFF;
 	uint32_t prefix = 0;
 	uint8_t keyspace_id = KV_KEYSPACE_IODATA;
-	char tmp_prefix[5] ={""};
-	sprintf(tmp_prefix, "%04x", tid);
-	memcpy(&prefix, tmp_prefix, sizeof(uint32_t));
+	memcpy(&prefix, &tid, sizeof(int));
 	uint32_t iterator = KV_INVALID_ITERATE_HANDLE;
 	fprintf(stdout, "[tid=%d]Iterate Open : keyspace_id=%d bitmask=%x bit_pattern=%x\n", tid, keyspace_id, bitmask, prefix);
 
 	iterator = kv_iterate_open(handle, keyspace_id, bitmask, prefix, iterate_type);
-	if (iterator != KV_INVALID_ITERATE_HANDLE) {
+	if(iterator != KV_INVALID_ITERATE_HANDLE && iterator != KV_ERR_ITERATE_ERROR){
 		fprintf(stdout, "[tid=%d]Iterate open success : iterator id=%d\n", tid, iterator);
 ITER_READ_PART:
 		for (i = 0 + (tid * iterate_read_count); i < iterate_read_count + (tid * iterate_read_count); i++) {
@@ -321,7 +322,7 @@ ITER_READ_PART:
 }
 
 int sdk_iterate_async(void) {
-	printf("%s start\n", __FUNCTION__);
+	fprintf(stderr,"%s start\n", __FUNCTION__);
 	srand(time(NULL)); //for random prefix
 
 	// local global variables
@@ -367,10 +368,10 @@ int sdk_iterate_async(void) {
 				set_cores[j] = 1;
 				//get accesible cores by current core j
 				ret = kv_get_devices_on_cpu(j, &nr_handle, arr_handle);
-				printf("current core(%d) is allowed to access on handle [", j);
+				fprintf(stderr,"current core(%d) is allowed to access on handle [", j);
 				//make threads which number is same with the number of accessible devices
 				for (int k = 0; k < nr_handle; k++) {
-					printf("%ld,", arr_handle[k]);
+					fprintf(stderr,"%ld,", arr_handle[k]);
 					p[nthreads].tid = nthreads;
 					p[nthreads].core_id = j;
 					p[nthreads].device_handle = arr_handle[k];
@@ -378,7 +379,7 @@ int sdk_iterate_async(void) {
 					p[nthreads].t_end = &thread_end[nthreads];
 					nthreads++;
 				}
-				printf("]\n");
+				fprintf(stderr,"]\n");
 			}
 		}
 	}
@@ -408,12 +409,12 @@ int sdk_iterate_async(void) {
 	kv_iterate_handle_info info[KV_MAX_ITERATE_HANDLE];
 	ret = kv_iterate_info(arr_handle[0], info, nr_iterate_handle);
 	if (ret == KV_SUCCESS) {
-		printf("iterate_handle count=%d\n", nr_iterate_handle);
+		fprintf(stderr,"iterate_handle count=%d\n", nr_iterate_handle);
 		for (i = 0; i < nr_iterate_handle; i++) {
-			printf("iterate_handle_info[%d] : info.handle_id=%d info.status=%d info.type=%d info.prefix=%08x info.bitmask=%08x info.is_eof=%d\n",
+			fprintf(stderr,"iterate_handle_info[%d] : info.handle_id=%d info.status=%d info.type=%d info.prefix=%08x info.bitmask=%08x info.is_eof=%d\n",
 					i + 1, info[i].handle_id, info[i].status, info[i].type, info[i].prefix, info[i].bitmask, info[i].is_eof);
 			if (info[i].status == ITERATE_HANDLE_OPENED) {
-				printf("close iterate_handle : %d\n", info[i].handle_id);
+				fprintf(stderr,"close iterate_handle : %d\n", info[i].handle_id);
 				kv_iterate_close(arr_handle[0], info[i].handle_id);
 			}
 		}

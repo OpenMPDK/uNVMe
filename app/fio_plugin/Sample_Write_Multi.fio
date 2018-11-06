@@ -1,6 +1,8 @@
 [global]
 ioengine=./unvme2_fio_plugin
 json_path=./unvme2_config_multi.json
+clat_percentiles=1
+percentile_list=1.0:5.0:10.0:20.0:30.0:40.0:50.0:60.0:70.0:90.0:95.0:99.0:99.5:99.9:99.99:99.999:99.9999
 thread=1
 group_reporting=0
 direct=1
@@ -12,6 +14,7 @@ offset_increment=10G
 rw=write
 iodepth=128
 bs=4k
+ks=16
 
 [test0]
 filename=0000.01.00.0

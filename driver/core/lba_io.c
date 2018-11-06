@@ -51,7 +51,6 @@ int32_t lba_nvme_process_all_cqs_thread(void *arg) {
 
         sched_setaffinity(0, sizeof(cpu_set_t), &cpuset);
 
-        nvme->stop_process_all_cqs = 0;
         while(!nvme->stop_process_all_cqs) {
                 kv_nvme_process_completion((uint64_t)nvme);
 		usleep(1);
@@ -74,8 +73,6 @@ int32_t lba_nvme_process_cq_thread(void *arg) {
         CPU_SET(pcq_arg->cpu_id, &cpuset);
 
         sched_setaffinity(0, sizeof(cpu_set_t), &cpuset);
-
-        pcq_arg->nvme->stop_process_cq[pcq_arg->thread_id] = 0;
 
         while(!pcq_arg->nvme->stop_process_cq[pcq_arg->thread_id]) {
                 for(queue_id = pcq_arg->async_qpair_start_index; queue_id < (pcq_arg->async_qpair_start_index + pcq_arg->num_async_qpairs); queue_id++)

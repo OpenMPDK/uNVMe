@@ -1,7 +1,7 @@
 // Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-// This source code is licensed under the BSD-style license found in the
-// LICENSE file in the root directory of this source tree. An additional grant
-// of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 //
 // This file implements the "bridge" between Java and C++ and enables
 // calling c++ rocksdb::DB methods from Java side.
@@ -122,7 +122,7 @@ jlongArray rocksdb_open_helper(JNIEnv* env, jlong jopt_handle,
   env->ReleaseLongArrayElements(jcolumn_options, jco, JNI_ABORT);
 
   if(has_exception == JNI_TRUE) {
-    // exception occured
+    // exception occurred
     env->ReleaseStringUTFChars(jdb_path, db_path);
     return nullptr;
   }
@@ -424,7 +424,7 @@ jboolean key_may_exist_helper(JNIEnv* env, rocksdb::DB* db,
   }
 
   rocksdb::Slice key_slice(reinterpret_cast<char*>(key), jkey_len);
-  
+
   std::string value;
   bool value_found = false;
   bool keyMayExist;
@@ -702,7 +702,7 @@ jint rocksdb_get_helper(JNIEnv* env, rocksdb::DB* db,
   const jint length = std::min(jval_len, cvalue_len);
 
   env->SetByteArrayRegion(jval, jval_off, length,
-                          reinterpret_cast<const jbyte*>(cvalue.c_str()));
+                          const_cast<jbyte*>(reinterpret_cast<const jbyte*>(cvalue.c_str())));
   if(env->ExceptionCheck()) {
     // exception thrown: OutOfMemoryError
     *has_exception = true;
@@ -727,7 +727,7 @@ inline void multi_get_helper_release_keys(JNIEnv* env,
  * cf multi get
  *
  * @return byte[][] of values or nullptr if an exception occurs
- */ 
+ */
 jobjectArray multi_get_helper(JNIEnv* env, jobject jdb, rocksdb::DB* db,
     const rocksdb::ReadOptions& rOpt, jobjectArray jkeys,
     jintArray jkey_offs, jintArray jkey_lens,
@@ -843,7 +843,7 @@ jobjectArray multi_get_helper(JNIEnv* env, jobject jdb, rocksdb::DB* db,
       }
 
       env->SetByteArrayRegion(jentry_value, 0, static_cast<jsize>(jvalue_len),
-          reinterpret_cast<const jbyte*>(value->c_str()));
+          const_cast<jbyte*>(reinterpret_cast<const jbyte*>(value->c_str())));
       if(env->ExceptionCheck()) {
         // exception thrown: ArrayIndexOutOfBoundsException
         env->DeleteLocalRef(jentry_value);
@@ -1373,7 +1373,7 @@ bool rocksdb_merge_helper(JNIEnv* env, rocksdb::DB* db,
   }
   rocksdb::Slice key_slice(reinterpret_cast<char*>(key), jkey_len);
 
-  jbyte* value = new jbyte[jkey_len];
+  jbyte* value = new jbyte[jval_len];
   env->GetByteArrayRegion(jval, jval_off, jval_len, value);
   if(env->ExceptionCheck()) {
     // exception thrown: ArrayIndexOutOfBoundsException
@@ -1608,7 +1608,7 @@ jlongArray Java_org_rocksdb_RocksDB_iterators(
     for (std::vector<rocksdb::Iterator*>::size_type i = 0;
         i < iterators.size(); i++) {
       env->SetLongArrayRegion(jLongArray, static_cast<jsize>(i), 1,
-                              reinterpret_cast<const jlong*>(&iterators[i]));
+                              const_cast<jlong*>(reinterpret_cast<const jlong*>(&iterators[i])));
       if(env->ExceptionCheck()) {
         // exception thrown: ArrayIndexOutOfBoundsException
         env->DeleteLocalRef(jLongArray);
@@ -1959,8 +1959,8 @@ bool rocksdb_compactrange_helper(JNIEnv* env, rocksdb::DB* db,
     s = db->CompactRange(compact_options, &begin_slice, &end_slice);
   }
 
-  env->ReleaseByteArrayElements(jend, begin, JNI_ABORT);
-  env->ReleaseByteArrayElements(jbegin, end, JNI_ABORT);
+  env->ReleaseByteArrayElements(jend, end, JNI_ABORT);
+  env->ReleaseByteArrayElements(jbegin, begin, JNI_ABORT);
 
   if (s.ok()) {
     return true;
@@ -2164,39 +2164,35 @@ void Java_org_rocksdb_RocksDB_setOptions(JNIEnv* env, jobject jdb,
 }
 
 //////////////////////////////////////////////////////////////////////////////
-// rocksdb::DB::AddFile
+// rocksdb::DB::IngestExternalFile
 
 /*
  * Class:     org_rocksdb_RocksDB
- * Method:    addFile
- * Signature: (JJ[Ljava/lang/String;IZ)V
+ * Method:    ingestExternalFile
+ * Signature: (JJ[Ljava/lang/String;IJ)V
  */
-void Java_org_rocksdb_RocksDB_addFile__JJ_3Ljava_lang_String_2IZ(
+void Java_org_rocksdb_RocksDB_ingestExternalFile(
     JNIEnv* env, jobject jdb, jlong jdb_handle, jlong jcf_handle,
     jobjectArray jfile_path_list, jint jfile_path_list_len,
-    jboolean jmove_file) {
-
+    jlong jingest_external_file_options_handle) {
   jboolean has_exception = JNI_FALSE;
   std::vector<std::string> file_path_list =
       rocksdb::JniUtil::copyStrings(env, jfile_path_list, jfile_path_list_len,
           &has_exception);
   if(has_exception == JNI_TRUE) {
-    // exception occured
+    // exception occurred
     return;
   }
 
   auto* db = reinterpret_cast<rocksdb::DB*>(jdb_handle);
   auto* column_family =
       reinterpret_cast<rocksdb::ColumnFamilyHandle*>(jcf_handle);
-  rocksdb::IngestExternalFileOptions ifo;
-  ifo.move_files = static_cast<bool>(jmove_file);
-  ifo.snapshot_consistency = true;
-  ifo.allow_global_seqno = false;
-  ifo.allow_blocking_flush = false;
+  auto* ifo =
+      reinterpret_cast<rocksdb::IngestExternalFileOptions*>(
+          jingest_external_file_options_handle);
   rocksdb::Status s =
-      db->IngestExternalFile(column_family, file_path_list, ifo);
+      db->IngestExternalFile(column_family, file_path_list, *ifo);
   if (!s.ok()) {
     rocksdb::RocksDBExceptionJni::ThrowNew(env, s);
   }
 }
-

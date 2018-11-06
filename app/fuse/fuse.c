@@ -93,7 +93,7 @@ spdk_fuse_getattr(const char *path, struct stat *stbuf, struct fuse_file_info *f
 		return 0;
 	}
 
-	rc = spdk_fs_file_stat(g_fs, g_channel, &path[1], &stat);
+	rc = spdk_fs_file_stat(g_fs, g_channel, path, &stat);
 	if (rc == 0) {
 		stbuf->st_mode = S_IFREG | 0644;
 		stbuf->st_nlink = 1;
@@ -120,7 +120,7 @@ spdk_fuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		file = spdk_fs_iter_get_file(iter);
 		iter = spdk_fs_iter_next(iter);
 		filename = spdk_file_get_name(file);
-		filler(buf, filename, NULL, 0, 0);
+		filler(buf, &filename[1], NULL, 0, 0);
 	}
 
 	return 0;
@@ -129,13 +129,13 @@ spdk_fuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 static int
 spdk_fuse_mknod(const char *path, mode_t mode, dev_t rdev)
 {
-	return spdk_fs_create_file(g_fs, g_channel, &path[1]);
+	return spdk_fs_create_file(g_fs, g_channel, path);
 }
 
 static int
 spdk_fuse_unlink(const char *path)
 {
-	return spdk_fs_delete_file(g_fs, g_channel, &path[1]);
+	return spdk_fs_delete_file(g_fs, g_channel, path);
 }
 
 static int
@@ -144,7 +144,7 @@ spdk_fuse_truncate(const char *path, off_t size, struct fuse_file_info *fi)
 	struct spdk_file *file;
 	int rc;
 
-	rc = spdk_fs_open_file(g_fs, g_channel, &path[1], 0, &file);
+	rc = spdk_fs_open_file(g_fs, g_channel, path, 0, &file);
 	if (rc != 0) {
 		return -rc;
 	}
@@ -167,7 +167,7 @@ spdk_fuse_open(const char *path, struct fuse_file_info *info)
 	struct spdk_file *file;
 	int rc;
 
-	rc = spdk_fs_open_file(g_fs, g_channel, &path[1], 0, &file);
+	rc = spdk_fs_open_file(g_fs, g_channel, path, 0, &file);
 	if (rc != 0) {
 		return -rc;
 	}
@@ -222,7 +222,7 @@ spdk_fuse_fsync(const char *path, int datasync, struct fuse_file_info *info)
 static int
 spdk_fuse_rename(const char *old_path, const char *new_path, unsigned int flags)
 {
-	return spdk_fs_rename_file(g_fs, g_channel, &old_path[1], &new_path[1]);
+	return spdk_fs_rename_file(g_fs, g_channel, old_path, new_path);
 }
 
 static struct fuse_operations spdk_fuse_oper = {
@@ -252,12 +252,7 @@ construct_targets(void)
 		exit(1);
 	}
 
-	if (!spdk_bdev_claim(bdev, NULL, NULL)) {
-		SPDK_ERRLOG("could not claim bdev %s\n", spdk_bdev_get_name(bdev));
-		exit(1);
-	}
-
-	g_bs_dev = spdk_bdev_create_bs_dev(bdev);
+	g_bs_dev = spdk_bdev_create_bs_dev(bdev, NULL, NULL);
 
 	printf("Mounting BlobFS on bdev %s\n", spdk_bdev_get_name(bdev));
 }
@@ -299,7 +294,7 @@ init_cb(void *ctx, struct spdk_filesystem *fs, int fserrno)
 	struct spdk_event *event;
 
 	g_fs = fs;
-	g_channel = spdk_fs_alloc_io_channel_sync(g_fs, SPDK_IO_PRIORITY_DEFAULT);
+	g_channel = spdk_fs_alloc_io_channel_sync(g_fs);
 	event = spdk_event_allocate(1, start_fuse_fn, NULL, NULL);
 	spdk_event_call(event);
 }
@@ -334,11 +329,11 @@ int main(int argc, char **argv)
 	char* config_json_path;
 	uint64_t app_hugemem_size_mb;
 	uint64_t fs_cache_size_mb;
-	int rc;
+	int rc = 0;
 
 	if (argc < 4) {
 		fprintf(stderr, "usage: %s <bdev name> <config.json path> <mountpoint>\n", argv[0]);
-		fprintf(stderr, "ex) %s unvme_bdev0n1 lba_sdk_config.json /mnt\n", argv[0]);
+		fprintf(stderr, "ex) %s unvme_bdev0n1 lba_sdk_config.json /opt\n", argv[0]);
 		exit(1);
 	}
 
@@ -354,34 +349,31 @@ int main(int argc, char **argv)
 	if(MIN_APP_HUGEMEM_SIZE_MB > app_hugemem_size_mb) {
 		fprintf(stderr, "app_hugemem_size must be larger than MIN_APP_HUGEMEM_SIZE_MB(%llu)\n", MIN_APP_HUGEMEM_SIZE_MB);
 		exit(1);
-	} else {
+	}
+	else{
 		fs_cache_size_mb = app_hugemem_size_mb - MIN_APP_HUGEMEM_SIZE_MB;
 	}
 
-	spdk_app_opts_init(&opts);
-	opts.shutdown_cb = spdk_fuse_shutdown;
-	opts.init_from = KV_SDK_INIT_FROM_JSON;
-	opts.options = (char*)&sdk_opt;
-
 	env_opts.name = "KV_Interface";
-	env_opts.dpdk_mem_size = app_hugemem_size_mb;
+	env_opts.mem_size = app_hugemem_size_mb;
 	env_opts.core_mask = "0x3";
 	env_opts.shm_id = getpid();
 
-	rc = kv_sdk_init_with_spdk_opts(opts.init_from, config_json_path, &env_opts);
+	rc = kv_sdk_init_with_spdk_opts(KV_SDK_INIT_FROM_STR, &sdk_opt, &env_opts);
 	if (rc != KV_SUCCESS) {
 		SPDK_ERRLOG("Error while doing sdk init.\n");
 		exit(EXIT_FAILURE);
 	}
 
-	spdk_app_init(&opts);
-
+	spdk_app_opts_init(&opts);
+	opts.shutdown_cb = spdk_fuse_shutdown;
 	spdk_fs_set_cache_size(fs_cache_size_mb);
 
-	spdk_app_start(spdk_fuse_run, NULL, NULL);
+	rc = spdk_app_start(&opts, spdk_fuse_run, NULL, NULL);
+
 	spdk_app_fini();
 
 	kv_sdk_finalize();
 
-	return 0;
+	return rc;
 }

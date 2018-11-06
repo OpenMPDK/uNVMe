@@ -73,7 +73,7 @@ static void _lba_async_io_complete(void *arg, const struct spdk_nvme_cpl *comple
 
 
 
-int _lba_nvme_write(kv_nvme_t *nvme, const kv_pair *kv, int core_id, uint8_t is_store) {
+int _lba_nvme_write(kv_nvme_t *nvme, kv_pair *kv, int core_id, uint8_t is_store) {
         int ret = KV_ERR_DD_INVALID_PARAM;
         struct spdk_nvme_qpair *qpair = NULL;
         nvme_cmd_sequence_t io_sequence = {0};
@@ -127,7 +127,7 @@ int _lba_nvme_write(kv_nvme_t *nvme, const kv_pair *kv, int core_id, uint8_t is_
         return io_sequence.status;
 }
 
-int _lba_nvme_write_async(kv_nvme_t *nvme, const kv_pair *kv, int core_id) {
+int _lba_nvme_write_async(kv_nvme_t *nvme, kv_pair *kv, int core_id) {
         int ret = KV_ERR_DD_INVALID_PARAM;
         struct spdk_nvme_qpair *qpair = NULL;
         void *buffer = NULL;
@@ -320,10 +320,14 @@ int _lba_nvme_delete(kv_nvme_t *nvme, const kv_pair *kv, int core_id) {
 int _lba_nvme_delete_async(kv_nvme_t *nvme, const kv_pair *kv, int core_id) {
 	int ret = KV_ERR_DD_INVALID_PARAM;
 	struct spdk_nvme_qpair *qpair = NULL;
-	uint64_t lba = 0;
+	uint64_t offset_blocks, num_blocks;
 	char *key_id = NULL;
 	char sub_key_id[LBA_SSD_KEY_ID_SIZE];
-	struct spdk_nvme_dsm_range dsm_range;
+	struct spdk_nvme_dsm_range dsm_ranges[SPDK_NVME_DATASET_MANAGEMENT_MAX_RANGES];
+	struct spdk_nvme_dsm_range *range;
+	uint64_t offset, remaining;
+	uint64_t num_ranges_u64;
+	uint16_t num_ranges;
 
 	ENTER();
 
@@ -344,16 +348,41 @@ int _lba_nvme_delete_async(kv_nvme_t *nvme, const kv_pair *kv, int core_id) {
 
 	key_id = (char *)(kv->key.key);
 
-	lba = *(uint64_t*)key_id;
+	offset_blocks = *(uint64_t*)key_id;
+	num_blocks = kv->value.length;
 
-	dsm_range.starting_lba = lba;
-	dsm_range.length = kv->value.length / nvme->sector_size;
-	dsm_range.attributes.raw = 0;
+	num_ranges_u64 = (num_blocks + SPDK_NVME_DATASET_MANAGEMENT_RANGE_MAX_BLOCKS - 1) /
+			 SPDK_NVME_DATASET_MANAGEMENT_RANGE_MAX_BLOCKS;
+	if (num_ranges_u64 > SPDK_COUNTOF(dsm_ranges)) {
+		SPDK_ERRLOG("Unmap request for %" PRIu64 " blocks is too large\n", num_blocks);
+		return -EINVAL;
+	}
+	num_ranges = (uint16_t)num_ranges_u64;
 
-	KVNVME_DEBUG("Complete Key ID: %s, Dissected Key ID: %s, LBA Offset: 0x%llx", key_id, sub_key_id, (unsigned long long)lba);
+	offset = offset_blocks;
+	remaining = num_blocks;
+	range = &dsm_ranges[0];
+
+	/* Fill max-size ranges until the remaining blocks fit into one range */
+	while (remaining > SPDK_NVME_DATASET_MANAGEMENT_RANGE_MAX_BLOCKS) {
+		range->attributes.raw = 0;
+		range->length = SPDK_NVME_DATASET_MANAGEMENT_RANGE_MAX_BLOCKS;
+		range->starting_lba = offset;
+
+		offset += SPDK_NVME_DATASET_MANAGEMENT_RANGE_MAX_BLOCKS;
+		remaining -= SPDK_NVME_DATASET_MANAGEMENT_RANGE_MAX_BLOCKS;
+		range++;
+	}
+
+	/* Final range describes the remaining blocks */
+	range->attributes.raw = 0;
+	range->length = remaining;
+	range->starting_lba = offset;
+
+	KVNVME_DEBUG("Complete Key ID: %s, Dissected Key ID: %s, LBA Offset: 0x%llx", key_id, sub_key_id, (unsigned long long)offset_blocks);
 
 	pthread_spin_lock(&qpair->sq_lock);
-	ret = spdk_nvme_ns_cmd_dataset_management(nvme->ns, qpair, SPDK_NVME_DSM_ATTR_DEALLOCATE, &dsm_range, 1, _lba_async_io_complete, (void *)kv);
+	ret = spdk_nvme_ns_cmd_dataset_management(nvme->ns, qpair, SPDK_NVME_DSM_ATTR_DEALLOCATE, dsm_ranges, num_ranges, _lba_async_io_complete, (void *)kv);
 	pthread_spin_unlock(&qpair->sq_lock);
 
 	LEAVE();

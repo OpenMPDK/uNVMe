@@ -21,7 +21,7 @@ void show_key(kv_key* origin_key, kv_key* hashed_key){
         printf("%llx\n", ((unsigned long long*)hashed_key->key)[1]);
 }
 
-void show_elapsed_time(struct timeval* start, struct timeval* end, char* msg, int repeat_count, int value_size, struct latency_stat *stat){
+void show_elapsed_time(struct timeval* start, struct timeval* end, char* msg, int repeat_count, uint64_t value_size, struct latency_stat *stat){
         long secs_used;
         long micros_used;
         secs_used=(end->tv_sec - start->tv_sec); //avoid overflow by subtracting first
@@ -33,21 +33,21 @@ void show_elapsed_time(struct timeval* start, struct timeval* end, char* msg, in
         if(repeat_count) {
                 float latency = (float)micros_used / repeat_count;
                 printf("%s latency: %.3f us per operation\n", (msg) ? msg : "", latency);
+                float ops = 1000000 / latency;
+                printf("%s ops: %.3f\n", (msg) ? msg : "", ops);
                 if(value_size > 0){
-                        float ops = 1000000 / latency;
                         uint64_t throughput = ops * value_size / KB;
-                        printf("%s ops: %.3f\n", (msg) ? msg : "", ops);
                         printf("%s throughput: %ld KB\n", (msg) ? msg : "", throughput);
-                        if (stat) {
-                                printf("%s latency QoS: \n", (msg) ? msg : "");
-                                print_latency_stat(stat);
-                        }
+                }
+                if (stat) {
+                        printf("%s latency QoS: \n", (msg) ? msg : "");
+                        print_latency_stat(stat);
                 }
         }
         printf("======================================================\n\n\n");
 }
 
-void show_elapsed_time_cumulative(struct timeval* start, struct timeval* end, int num_timeval, char* msg, int repeat_count_each, int value_size, struct latency_stat *stat){
+void show_elapsed_time_cumulative(struct timeval* start, struct timeval* end, int num_timeval, char* msg, int repeat_count_each, uint64_t value_size, struct latency_stat *stat){
 	float total_latency = 0.f;
         float total_avg_latency = 0.f;
         float total_ops = 0.f;
@@ -66,14 +66,14 @@ void show_elapsed_time_cumulative(struct timeval* start, struct timeval* end, in
 
         printf("======================================================\n");
         printf("%s latency: %.3f us per operation\n", (msg) ? msg : "", total_avg_latency);
+        printf("%s ops: %.3f\n", (msg) ? msg : "", total_ops);
         if(value_size > 0){
                 uint64_t total_throughput = total_ops * value_size / KB;
-                printf("%s ops: %.3f\n", (msg) ? msg : "", total_ops);
                 printf("%s throughput: %ld KB\n", (msg) ? msg : "", total_throughput);
-                if (stat) {
-                        printf("%s latency QoS: \n", (msg) ? msg : "");
-                        print_latency_stat(stat);
-                }
+        }
+        if (stat) {
+                printf("%s latency QoS: \n", (msg) ? msg : "");
+                print_latency_stat(stat);
         }
         printf("======================================================\n\n\n");
 }

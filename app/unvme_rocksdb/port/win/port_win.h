@@ -1,7 +1,7 @@
 //  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-//  This source code is licensed under the BSD-style license found in the
-//  LICENSE file in the root directory of this source tree. An additional grant
-//  of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 //
 // Copyright (c) 2011 The LevelDB Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -47,7 +47,9 @@
 #undef GetCurrentTime
 #undef DeleteFile
 
+#ifndef _SSIZE_T_DEFINED
 typedef SSIZE_T ssize_t;
+#endif
 
 // size_t printf formatting named in the manner of C99 standard formatting
 // strings such as PRIu64
@@ -56,12 +58,15 @@ typedef SSIZE_T ssize_t;
 #define ROCKSDB_PRIszt "Iu"
 #endif
 
+#ifdef _MSC_VER
 #define __attribute__(A)
 
 // Thread local storage on Linux
 // There is thread_local in C++11
 #ifndef __thread
 #define __thread __declspec(thread)
+#endif
+
 #endif
 
 #ifndef PLATFORM_IS_LITTLE_ENDIAN
@@ -230,7 +235,9 @@ struct OnceType {
 #define LEVELDB_ONCE_INIT port::OnceType::Init()
 extern void InitOnce(OnceType* once, void (*initializer)());
 
+#ifndef CACHE_LINE_SIZE
 #define CACHE_LINE_SIZE 64U
+#endif
 
 static inline void AsmVolatilePause() {
 #if defined(_M_IX86) || defined(_M_X64)

@@ -139,6 +139,7 @@ int ut() {
 		if(!kv[i])
 			return -ENOMEM;
 
+		kv[i]->keyspace_id = KV_KEYSPACE_IODATA;
 		kv[i]->key.key = malloc(key_length + 1);
 		if(!kv[i]->key.key)
 			return -ENOMEM;

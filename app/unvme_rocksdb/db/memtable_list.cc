@@ -1,7 +1,7 @@
 //  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-//  This source code is licensed under the BSD-style license found in the
-//  LICENSE file in the root directory of this source tree. An additional grant
-//  of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 //
 #include "db/memtable_list.h"
 
@@ -13,6 +13,7 @@
 #include <string>
 #include "db/memtable.h"
 #include "db/version_set.h"
+#include "monitoring/thread_status_util.h"
 #include "rocksdb/db.h"
 #include "rocksdb/env.h"
 #include "rocksdb/iterator.h"
@@ -20,7 +21,6 @@
 #include "util/coding.h"
 #include "util/log_buffer.h"
 #include "util/sync_point.h"
-#include "util/thread_status_util.h"
 
 namespace rocksdb {
 
@@ -161,6 +161,18 @@ Status MemTableListVersion::AddRangeTombstoneIterators(
     Status s = range_del_agg->AddTombstones(std::move(range_del_iter));
     if (!s.ok()) {
       return s;
+    }
+  }
+  return Status::OK();
+}
+
+Status MemTableListVersion::AddRangeTombstoneIterators(
+    const ReadOptions& read_opts,
+    std::vector<InternalIterator*>* range_del_iters) {
+  for (auto& m : memlist_) {
+    auto* range_del_iter = m->NewRangeTombstoneIterator(read_opts);
+    if (range_del_iter != nullptr) {
+      range_del_iters->push_back(range_del_iter);
     }
   }
   return Status::OK();
@@ -355,9 +367,9 @@ Status MemTableList::InstallMemtableFlushResults(
       }
       if (it == memlist.rbegin() || batch_file_number != m->file_number_) {
         batch_file_number = m->file_number_;
-        LogToBuffer(log_buffer,
-                    "[%s] Level-0 commit table #%" PRIu64 " started",
-                    cfd->GetName().c_str(), m->file_number_);
+        ROCKS_LOG_BUFFER(log_buffer,
+                         "[%s] Level-0 commit table #%" PRIu64 " started",
+                         cfd->GetName().c_str(), m->file_number_);
         edit_list.push_back(&m->edit_);
       }
       batch_count++;
@@ -378,9 +390,9 @@ Status MemTableList::InstallMemtableFlushResults(
       if (s.ok()) {         // commit new state
         while (batch_count-- > 0) {
           MemTable* m = current_->memlist_.back();
-          LogToBuffer(log_buffer, "[%s] Level-0 commit table #%" PRIu64
-                                  ": memtable #%" PRIu64 " done",
-                      cfd->GetName().c_str(), m->file_number_, mem_id);
+          ROCKS_LOG_BUFFER(log_buffer, "[%s] Level-0 commit table #%" PRIu64
+                                       ": memtable #%" PRIu64 " done",
+                           cfd->GetName().c_str(), m->file_number_, mem_id);
           assert(m->file_number_ > 0);
           current_->Remove(m, to_delete);
           ++mem_id;
@@ -389,9 +401,9 @@ Status MemTableList::InstallMemtableFlushResults(
         for (auto it = current_->memlist_.rbegin(); batch_count-- > 0; it++) {
           MemTable* m = *it;
           // commit failed. setup state so that we can flush again.
-          LogToBuffer(log_buffer, "Level-0 commit table #%" PRIu64
-                                  ": memtable #%" PRIu64 " failed",
-                      m->file_number_, mem_id);
+          ROCKS_LOG_BUFFER(log_buffer, "Level-0 commit table #%" PRIu64
+                                       ": memtable #%" PRIu64 " failed",
+                           m->file_number_, mem_id);
           m->flush_completed_ = false;
           m->flush_in_progress_ = false;
           m->edit_.Clear();

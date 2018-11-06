@@ -49,11 +49,6 @@
 #include "kv_types.h"
 #include "spdk/env.h"
 
-// NOTE: (0911)below constants have been moved to kv_types.h
-//#define	LBA_TYPE_SSD	0
-//#define	KV_TYPE_SSD	1
-//#define	MAX_CPU_CORES	64
-
 #define	SYNC_IO_QUEUE	1
 #define	ASYNC_IO_QUEUE	2
 
@@ -148,13 +143,13 @@ int kv_nvme_is_dd_initialized(void);
 uint64_t kv_nvme_open(const char *bdf);
 
 /**
- * @brief Display the WAF (Write Amplificaton Factor) in a KV NVMe Device
+ * @brief Display WAF(Write Amplification Factor) of the KV NVMe Device
  * @param handle Handle to the KV NVMe Device
  */
 uint64_t kv_nvme_get_waf(uint64_t handle);
 
 /**
- * @brief Gmet Smart Log with given log id and buffer
+ * @brief Get Smart Log with given log id and buffer
  * @param handle Handle to the KV NVMe Device
  * @log_id log page identifier to read
  * @buffer buffer to store read log (Heap)
@@ -237,7 +232,7 @@ kv_nvme_cpl_t *kv_nvme_submit_raw_cmd(uint64_t handle, kv_nvme_cmd_t cmd, void *
  * @return 0 : Success
  * @return > 0: Status of the Store command
  */
-int kv_nvme_write(uint64_t handle, int qid, const kv_pair* kv);
+int kv_nvme_write(uint64_t handle, int qid, kv_pair* kv);
 
 /**
  * @brief Append Key-Value pair to a KV NVMe Device
@@ -247,7 +242,7 @@ int kv_nvme_write(uint64_t handle, int qid, const kv_pair* kv);
  * @return 0 : Success
  * @return > 0: Status of the Store command
  */
-int kv_nvme_append(uint64_t handle, int qid, const kv_pair* kv);
+int kv_nvme_append(uint64_t handle, int qid, kv_pair* kv);
 
 /**
  * @brief Store Key-Value pair to a KV NVMe Device Asynchronously
@@ -257,7 +252,7 @@ int kv_nvme_append(uint64_t handle, int qid, const kv_pair* kv);
  * @return 0 : Success
  * @return > 0: Status of the Store command
  */
-int kv_nvme_write_async(uint64_t handle, int qid, const kv_pair* kv);
+int kv_nvme_write_async(uint64_t handle, int qid, kv_pair* kv);
 
 /**
  * @brief Retrieve Value for a particular Key, from a KV NVMe Device
@@ -419,22 +414,22 @@ int kv_nvme_finalize(char *bdf);
 /**
  * @brief Allocate Physically Contiguous Memory
  * @param size Size of the physically contiguous memory to allocate (in bytes)
- * @return ptr : Valid pointer to the physically contiguous memory if succcess, else NULL
+ * @return ptr : Valid pointer to the physically contiguous memory if success, else NULL
  */
 void *kv_alloc(unsigned long long size);
 
 /**
- * @brief Allocate Physically Contiguous Memory and Fill it with Zeroes
+ * @brief Allocate Physically Contiguous Memory and Fill it with zeros
  * @param size Size of the physically contiguous memory to allocate (in bytes)
- * @return ptr : Valid pointer to the physically contiguous memory if succcess, else NULL
+ * @return ptr : Valid pointer to the physically contiguous memory if success, else NULL
  */
 void *kv_zalloc(unsigned long long size);
 
 /**
- * @brief Allocate Physically Contiguous Memory and Fill it with Zeroes
+ * @brief Allocate Physically Contiguous Memory and Fill it with zeros
  * @param size Size of the physically contiguous memory to allocate (in bytes)
  * @param socket_id NUMA Socket ID (-1 = SPDK_ENV_SOCKET_ID_ANY)
- * @return ptr : Valid pointer to the physically contiguous memory if succcess, else NULL
+ * @return ptr : Valid pointer to the physically contiguous memory if success, else NULL
  */
 void *kv_zalloc_socket(unsigned long long size, int socket_id);
 

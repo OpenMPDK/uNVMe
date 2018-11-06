@@ -1,7 +1,7 @@
 //  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-//  This source code is licensed under the BSD-style license found in the
-//  LICENSE file in the root directory of this source tree. An additional grant
-//  of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 //
 // Copyright (c) 2011 The LevelDB Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -322,7 +322,7 @@ void CuckooTableIterator::PrepareKVAtCurrIdx() {
     curr_key_.SetInternalKey(Slice(offset, reader_->user_key_length_),
                              0, kTypeValue);
   } else {
-    curr_key_.SetKey(Slice(offset, reader_->key_length_));
+    curr_key_.SetInternalKey(Slice(offset, reader_->key_length_));
   }
   curr_value_ = Slice(offset + reader_->key_length_, reader_->value_length_);
 }
@@ -352,7 +352,7 @@ void CuckooTableIterator::Prev() {
 
 Slice CuckooTableIterator::key() const {
   assert(Valid());
-  return curr_key_.GetKey();
+  return curr_key_.GetInternalKey();
 }
 
 Slice CuckooTableIterator::value() const {
@@ -364,14 +364,11 @@ extern InternalIterator* NewErrorInternalIterator(const Status& status,
                                                   Arena* arena);
 
 InternalIterator* CuckooTableReader::NewIterator(
-    const ReadOptions& read_options, Arena* arena, bool skip_filters) {
+    const ReadOptions& read_options, Arena* arena,
+    const InternalKeyComparator* icomp, bool skip_filters) {
   if (!status().ok()) {
     return NewErrorInternalIterator(
         Status::Corruption("CuckooTableReader status is not okay."), arena);
-  }
-  if (read_options.total_order_seek) {
-    return NewErrorInternalIterator(
-        Status::InvalidArgument("total_order_seek is not supported."), arena);
   }
   CuckooTableIterator* iter;
   if (arena == nullptr) {

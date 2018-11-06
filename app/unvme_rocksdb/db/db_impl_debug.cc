@@ -1,7 +1,7 @@
 //  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-//  This source code is licensed under the BSD-style license found in the
-//  LICENSE file in the root directory of this source tree. An additional grant
-//  of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 //
 // Copyright (c) 2011 The LevelDB Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -10,7 +10,7 @@
 #ifndef NDEBUG
 
 #include "db/db_impl.h"
-#include "util/thread_status_updater.h"
+#include "monitoring/thread_status_updater.h"
 
 namespace rocksdb {
 
@@ -19,9 +19,10 @@ uint64_t DBImpl::TEST_GetLevel0TotalSize() {
   return default_cf_handle_->cfd()->current()->storage_info()->NumLevelBytes(0);
 }
 
-void DBImpl::TEST_MaybeFlushColumnFamilies() {
+void DBImpl::TEST_HandleWALFull() {
+  WriteContext write_context;
   InstrumentedMutexLock l(&mutex_);
-  MaybeFlushColumnFamilies();
+  HandleWALFull(&write_context);
 }
 
 int64_t DBImpl::TEST_MaxNextLevelOverlappingBytes(
@@ -185,7 +186,12 @@ Status DBImpl::TEST_GetLatestMutableCFOptions(
 
 int DBImpl::TEST_BGCompactionsAllowed() const {
   InstrumentedMutexLock l(&mutex_);
-  return BGCompactionsAllowed();
+  return GetBGJobLimits().max_compactions;
+}
+
+int DBImpl::TEST_BGFlushesAllowed() const {
+  InstrumentedMutexLock l(&mutex_);
+  return GetBGJobLimits().max_flushes;
 }
 
 }  // namespace rocksdb

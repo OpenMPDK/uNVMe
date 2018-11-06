@@ -23,7 +23,7 @@ if [ -s /etc/redhat-release ]; then
 	# Additional dependencies for SPDK CLI
 	yum install -y python-configshell
 	# Additional dependencies for MPDK
-	yum install -y gflags-devel scons check-devel
+	yum install -y gflags-devel scons check-devel numactl-libs libuuid-devel
 
 elif [ -f /etc/debian_version ]; then
 	# Includes Ubuntu, Debian
@@ -37,6 +37,8 @@ elif [ -f /etc/debian_version ]; then
 	apt-get install -y doxygen mscgen graphviz
 	# Additional dependencies for SPDK CLI
 	apt-get install -y "python-configshell*"
+	# Additional dependencies for MPDK
+	apt-get install -y scons check libnuma-dev uuid-dev
 elif [ -f /etc/SuSE-release ]; then
 	zypper install -y gcc gcc-c++ make cunit-devel libaio-devel libopenssl-devel \
 		git-core lcov python-base python-pep8 libuuid-devel sg3_utils

@@ -1,12 +1,12 @@
 //  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-//  This source code is licensed under the BSD-style license found in the
-//  LICENSE file in the root directory of this source tree. An additional grant
-//  of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 
 #include "rocksdb/utilities/sim_cache.h"
 #include <atomic>
+#include "monitoring/statistics.h"
 #include "port/port.h"
-#include "util/statistics.h"
 
 namespace rocksdb {
 
@@ -66,7 +66,9 @@ class SimCacheImpl : public SimCache {
 
   virtual bool Ref(Handle* handle) override { return cache_->Ref(handle); }
 
-  virtual void Release(Handle* handle) override { cache_->Release(handle); }
+  virtual bool Release(Handle* handle, bool force_erase = false) override {
+    return cache_->Release(handle, force_erase);
+  }
 
   virtual void Erase(const Slice& key) override {
     cache_->Erase(key);

@@ -1,0 +1,34 @@
+[Passthru]
+  # PT <bdev name> <vbdev name>
+  PT Malloc3 TestPT
+
+[Malloc]
+  NumberOfLuns 4
+  LunSizeInMB 64
+
+[Split]
+  # Split Malloc1 into two auto-sized halves
+  Split Malloc1 2
+
+  # Split Malloc2 into eight 4-megabyte pieces,
+  # leaving the rest of the device inaccessible
+  Split Malloc2 8 4
+
+[AIO]
+  AIO /dev/ram0 AIO0
+  AIO /tmp/aiofile AIO1 2048
+
+[Ioat]
+  Disable Yes
+
+[QoS]
+  # QoS section defines limitation on performance
+  # metric like IOPS
+  #
+  # Format: Limit_IOPS Bdev_Name IOPS_Limit_Value
+  #
+  # IOPS limit must be 10000 or greater and be multiple
+  # of 10000
+  #
+  # Assign 20000 IOPS for the Malloc0 block device
+  Limit_IOPS Malloc0 20000

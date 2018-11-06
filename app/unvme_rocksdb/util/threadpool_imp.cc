@@ -1,7 +1,7 @@
 //  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-//  This source code is licensed under the BSD-style license found in the
-//  LICENSE file in the root directory of this source tree. An additional grant
-//  of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 //
 // Copyright (c) 2011 The LevelDB Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -9,8 +9,8 @@
 
 #include "util/threadpool_imp.h"
 
+#include "monitoring/thread_status_util.h"
 #include "port/port.h"
-#include "util/thread_status_util.h"
 
 #ifndef OS_WIN
 #  include <unistd.h>
@@ -45,6 +45,7 @@ struct ThreadPoolImpl::Impl {
   void JoinThreads(bool wait_for_jobs_to_complete);
 
   void SetBackgroundThreadsInternal(int num, bool allow_reduce);
+  int GetBackgroundThreads();
 
   unsigned int GetQueueLen() const {
     return queue_len_.load(std::memory_order_relaxed);
@@ -249,11 +250,7 @@ void* ThreadPoolImpl::Impl::BGThreadWrapper(void* arg) {
   BGThreadMetadata* meta = reinterpret_cast<BGThreadMetadata*>(arg);
   size_t thread_id = meta->thread_id_;
   ThreadPoolImpl::Impl* tp = meta->thread_pool_;
-
-#ifdef SPDK_BUILD
   SpdkInitializeThread();
-#endif
-
 #ifdef ROCKSDB_USING_THREAD_STATUS
   // for thread-status
   ThreadStatusUtil::RegisterThread(
@@ -278,15 +275,25 @@ void ThreadPoolImpl::Impl::SetBackgroundThreadsInternal(int num,
   }
   if (num > total_threads_limit_ ||
       (num < total_threads_limit_ && allow_reduce)) {
-    total_threads_limit_ = std::max(1, num);
+    total_threads_limit_ = std::max(0, num);
     WakeUpAllThreads();
     StartBGThreads();
   }
 }
 
+int ThreadPoolImpl::Impl::GetBackgroundThreads() {
+  std::unique_lock<std::mutex> lock(mu_);
+  return total_threads_limit_;
+}
+
 void ThreadPoolImpl::Impl::StartBGThreads() {
   // Start background thread if necessary
   while ((int)bgthreads_.size() < total_threads_limit_) {
+
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(((int)bgthreads_.size()) % (int)sysconf(_SC_NPROCESSORS_ONLN), &cpuset);
+    sched_setaffinity(0, sizeof(cpu_set_t), &cpuset);
 
     port::Thread p_t(&BGThreadWrapper,
       new BGThreadMetadata(this, bgthreads_.size()));
@@ -385,6 +392,10 @@ void ThreadPoolImpl::JoinAllThreads() {
 
 void ThreadPoolImpl::SetBackgroundThreads(int num) {
   impl_->SetBackgroundThreadsInternal(num, true);
+}
+
+int ThreadPoolImpl::GetBackgroundThreads() {
+  return impl_->GetBackgroundThreads();
 }
 
 unsigned int ThreadPoolImpl::GetQueueLen() const {

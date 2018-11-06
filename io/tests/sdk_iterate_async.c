@@ -73,7 +73,6 @@ void async_iterate_read_cb(kv_iterate* it, unsigned int result, unsigned int sta
 	}
 
 	fprintf(stderr,"Iterate Read Result: it->kv.key.length=%d it->kv.value.length=%d status=%d\n", it->kv.key.length, it->kv.value.length, status);
-	fprintf(stderr,"Iterate Read Result: it->kv.key.key=%s it->kv.value.value=%s value_len=%d\n", (char*)it->kv.key.key, (char*)it->kv.value.value, (int)strlen(it->kv.value.value));
 }
 
 void async_store_cb(kv_pair* kv, unsigned int result, unsigned int status){
@@ -111,7 +110,7 @@ void async_delete_cb(kv_pair *kv, unsigned int result, unsigned int status) {
 
 
 int sdk_iterate_async(void){
-	printf("%s start\n",__FUNCTION__);
+	fprintf(stderr,"%s start\n",__FUNCTION__);
 
 	srand(time(NULL)); //for random prefix
 	int key_length = 16;
@@ -133,6 +132,10 @@ int sdk_iterate_async(void){
 	kv_sdk sdk_opt;
 	memset(&sdk_opt,0, sizeof(kv_sdk));
 	strcpy(sdk_opt.dev_id[0], "0000:02:00.0");
+	sdk_opt.dd_options[0].core_mask = 0x1;
+	sdk_opt.dd_options[0].sync_mask = 0x0;
+	sdk_opt.dd_options[0].cq_thread_mask = 0x2;
+
 	sdk_opt.ssd_type=KV_TYPE_SSD;
 	ret = kv_sdk_init(KV_SDK_INIT_FROM_STR, &sdk_opt);
 	fail_unless(ret == KV_SUCCESS);
@@ -161,10 +164,10 @@ int sdk_iterate_async(void){
 		fail_unless(kv[i] != NULL);
 
 		kv[i]->keyspace_id = KV_KEYSPACE_IODATA;
-                kv[i]->key.key = malloc(key_length + 1);
+                kv[i]->key.key = malloc(key_length);
 		fail_unless(kv[i]->key.key != NULL);
 		kv[i]->key.length = key_length;
-                memset(kv[i]->key.key,0,key_length + 1);
+                memset(kv[i]->key.key,0,key_length);
 
                 kv[i]->value.value = malloc(value_size*2); //for retrieve appended kv pair
 		fail_unless(kv[i]->value.value != NULL);
@@ -182,10 +185,10 @@ int sdk_iterate_async(void){
         for(i=0;i<iterate_read_count;i++){
 		it[i] = (kv_iterate*)malloc(sizeof(kv_iterate));
 		it[i]->iterator = KV_INVALID_ITERATE_HANDLE;
-		it[i]->kv.key.key = malloc(key_length + 1);
+		it[i]->kv.key.key = malloc(key_length);
 		fail_unless(it[i]->kv.key.key);
 		it[i]->kv.key.length = key_length;
-		memset(it[i]->kv.key.key, 0, it[i]->kv.key.length + 1);
+		memset(it[i]->kv.key.key, 0, it[i]->kv.key.length);
 
 		it[i]->kv.value.value = malloc(iterate_buffer_size);
 		fail_unless(it[i]->kv.value.value);
@@ -205,12 +208,13 @@ int sdk_iterate_async(void){
 	//SDK Store
 	fprintf(stderr,"kv_store_async: ");
 	for(i=0;i<insert_count;i++){
-		sprintf(kv[i]->key.key, "%04x%012x", key_prefix, i);
+		memset(kv[i]->key.key, 0, key_length);
+		memcpy(kv[i]->key.key + ((size_t)key_length > sizeof(int) ? (key_length - sizeof(i)) : 0), &i, MIN((size_t)key_length, sizeof(int)));
 		kv[i]->key.length = key_length;
 		kv[i]->param.io_option.store_option = KV_STORE_DEFAULT;
 		kv[i]->param.async_cb = async_store_cb;
 		memset(kv[i]->param.private_data, 0, sizeof(struct time_stamp));
-		//printf("WRITE k=%s v=%s\n",(char*)kv[i]->key.key,(char*)kv[i]->value.value);
+		//fprintf(stderr,"WRITE k=%s v=%s\n",(char*)kv[i]->key.key,(char*)kv[i]->value.value);
 	}
 
 	gettimeofday(&start, NULL);
@@ -238,12 +242,13 @@ int sdk_iterate_async(void){
 	//SDK Retrieve
 	fprintf(stderr,"kv_retrieve_async: ");
 	for(i=0;i<insert_count;i++){
-		sprintf(kv[i]->key.key, "%04x%012x", key_prefix, i);
+		memset(kv[i]->key.key, 0, key_length);
+		memcpy(kv[i]->key.key + ((size_t)key_length > sizeof(int) ? (key_length - sizeof(i)) : 0), &i, MIN((size_t)key_length, sizeof(int)));
 		kv[i]->key.length = key_length;
 		kv[i]->param.io_option.retrieve_option = KV_RETRIEVE_DEFAULT;
 		kv[i]->param.async_cb = async_retrieve_cb;
 		memset(kv[i]->param.private_data, 0, sizeof(struct time_stamp));
-		//printf("READ k=%s v=%s\n",(char*)kv[i]->key.key,(char*)kv[i]->value.value);
+		//fprintf(stderr,"READ k=%s v=%s\n",(char*)kv[i]->key.key,(char*)kv[i]->value.value);
 	}
 
 	gettimeofday(&start, NULL);
@@ -281,7 +286,7 @@ int sdk_iterate_async(void){
                         fprintf(stderr, "Retrieve iterate_handle_info[%d] : info.handle_id=%d info.status=%d info.type=%d info.keyspace_id=%d info.prefix=%08x info.bitmask=%08x info.is_eof=%d\n",
                                 i+1, info[i].handle_id, info[i].status, info[i].type, info[i].keyspace_id, info[i].prefix, info[i].bitmask, info[i].is_eof);
                         if(info[i].status == ITERATE_HANDLE_OPENED){
-                                printf("close iterate_handle : %d\n", info[i].handle_id);
+                                fprintf(stderr,"close iterate_handle : %d\n", info[i].handle_id);
                                 kv_iterate_close(handle, info[i].handle_id);
                         }
                 }
@@ -310,7 +315,7 @@ int sdk_iterate_async(void){
 	}
 
         show_elapsed_time(&start,&end,"kv_iterate_open",1, 0, NULL);
-        if(iterator != KV_INVALID_ITERATE_HANDLE){
+        if(iterator != KV_INVALID_ITERATE_HANDLE && iterator != KV_ERR_ITERATE_ERROR){
                 fprintf(stderr,"Iterate open success : iterator id=%d\n", iterator);
 		for(i=0;i<iterate_read_count;i++){
                         it[i]->iterator = iterator;
@@ -357,7 +362,8 @@ finalize:
 	//SDK Delete
 	fprintf(stderr,"kv_delete_async: ");
 	for(i=0;i<insert_count;i++){
-		sprintf(kv[i]->key.key, "%04x%012x", key_prefix, i);
+		memset(kv[i]->key.key, 0, key_length);
+		memcpy(kv[i]->key.key + ((size_t)key_length > sizeof(int) ? (key_length - sizeof(i)) : 0), &i, MIN((size_t)key_length, sizeof(int)));
 		kv[i]->key.length = key_length;
 		kv[i]->param.io_option.delete_option = KV_DELETE_DEFAULT;
 		kv[i]->param.async_cb = async_delete_cb;

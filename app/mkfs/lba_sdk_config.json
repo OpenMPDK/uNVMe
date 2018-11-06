@@ -14,7 +14,7 @@
       "core_mask" : 1,
       "sync_mask" : 0,
       "cq_thread_mask" : 0,
-      "queue_depth" : 2048
+      "queue_depth" : 256
     }
   ]
 }

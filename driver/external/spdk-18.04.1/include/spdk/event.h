@@ -1,0 +1,254 @@
+/*-
+ *   BSD LICENSE
+ *
+ *   Copyright (c) Intel Corporation.
+ *   All rights reserved.
+ *
+ *   Redistribution and use in source and binary forms, with or without
+ *   modification, are permitted provided that the following conditions
+ *   are met:
+ *
+ *     * Redistributions of source code must retain the above copyright
+ *       notice, this list of conditions and the following disclaimer.
+ *     * Redistributions in binary form must reproduce the above copyright
+ *       notice, this list of conditions and the following disclaimer in
+ *       the documentation and/or other materials provided with the
+ *       distribution.
+ *     * Neither the name of Intel Corporation nor the names of its
+ *       contributors may be used to endorse or promote products derived
+ *       from this software without specific prior written permission.
+ *
+ *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+/**
+ * \file
+ * Event framework public API.
+ *
+ * See @ref event_components for an overview of the SPDK event framework API.
+ */
+
+#ifndef SPDK_EVENT_H
+#define SPDK_EVENT_H
+
+#include "spdk/stdinc.h"
+
+#include "spdk/cpuset.h"
+#include "spdk/queue.h"
+#include "spdk/log.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef void (*spdk_event_fn)(void *arg1, void *arg2);
+
+/**
+ * \brief An event is a function that is passed to and called on an lcore.
+ */
+struct spdk_event;
+
+/**
+ * \brief A poller is a function that is repeatedly called on an lcore.
+ */
+struct spdk_poller;
+
+typedef void (*spdk_app_shutdown_cb)(void);
+typedef void (*spdk_sighandler_t)(int);
+
+#define SPDK_DEFAULT_RPC_ADDR "/var/tmp/spdk.sock"
+
+/**
+ * \brief Event framework initialization options
+ */
+struct spdk_app_opts {
+	const char *name;
+	const char *config_file;
+	const char *rpc_addr; /* Can be UNIX domain socket path or IP address + TCP port */
+	const char *reactor_mask;
+	const char *tpoint_group_mask;
+
+	int shm_id;
+
+	spdk_app_shutdown_cb	shutdown_cb;
+	spdk_sighandler_t	usr1_handler;
+
+	bool			enable_coredump;
+	int			mem_channel;
+	int			master_core;
+	int			mem_size;
+	bool			no_pci;
+	bool			hugepage_single_segments;
+	enum spdk_log_level	print_level;
+
+	/* The maximum latency allowed when passing an event
+	 * from one core to another. A value of 0
+	 * means all cores continually poll. This is
+	 * specified in microseconds.
+	 */
+	uint64_t		max_delay_us;
+};
+
+/**
+ * Initialize the default value of opts
+ *
+ * \param opts Data structure where SPDK will initialize the default options.
+ */
+void spdk_app_opts_init(struct spdk_app_opts *opts);
+
+/**
+ * Start the framework.
+ *
+ * Before calling this function, the fields of opts must be initialized by
+ * spdk_app_opts_init(). Once started, the framework will call start_fn on the
+ * master core with the arguments provided. This call will block until spdk_app_stop()
+ * is called, or if an error condition occurs during the intialization
+ * code within spdk_app_start(), itself, before invoking the caller's
+ * supplied function.
+ *
+ * \param opts Initialization options used for this application.
+ * \param start_fn Event function that is called when the framework starts.
+ * \param arg1 Argument passed to function start_fn.
+ * \param arg2 Argument passed to function start_fn.
+ *
+ * \return 0 on success or non-zero on failure.
+ */
+int spdk_app_start(struct spdk_app_opts *opts, spdk_event_fn start_fn,
+		   void *arg1, void *arg2);
+
+/**
+ * Perform final shutdown operations on an application using the event framework.
+ */
+void spdk_app_fini(void);
+
+/**
+ * Start shutting down the framework.
+ *
+ * Typically this function is not called directly, and the shutdown process is
+ * started implicitly by a process signal. But in applications that are using
+ * SPDK for a subset of its process threads, this function can be called in lieu
+ * of a signal.
+ */
+void spdk_app_start_shutdown(void);
+
+/**
+ * Stop the framework.
+ *
+ * This does not wait for all threads to exit. Instead, it kicks off the shutdown
+ * process and returns. Once the shutdown process is complete, spdk_app_start()
+ * will return.
+ *
+ * \param rc The rc value specified here will be returned to caller of spdk_app_start().
+ */
+void spdk_app_stop(int rc);
+
+/**
+ * Generate a configuration file that corresponds to the current running state.
+ *
+ * \param config_str Values obtained from the generated configuration file.
+ * \param name Prefix for name of temporary configuration file to save the current config.
+ *
+ * \return 0 on success, -1 on failure.
+ */
+int spdk_app_get_running_config(char **config_str, char *name);
+
+/**
+ * Return the shared memory id for this application.
+ *
+ * \return shared memory id.
+ */
+int spdk_app_get_shm_id(void);
+
+/**
+ * Convert a string containing a CPU core mask into a bitmask
+ *
+ * \param mask String containing a CPU core mask.
+ * \param cpumask Bitmask of CPU cores.
+ *
+ * \return 0 on success, -1 on failure.
+ */
+int spdk_app_parse_core_mask(const char *mask, struct spdk_cpuset *cpumask);
+
+/**
+ * Get the mask of the CPU cores active for this application
+ *
+ * \return the bitmask of the active CPU cores.
+ */
+struct spdk_cpuset *spdk_app_get_core_mask(void);
+
+#define SPDK_APP_GETOPT_STRING "c:de:ghi:m:n:p:qr:s:t:u"
+
+enum spdk_app_parse_args_rvals {
+	SPDK_APP_PARSE_ARGS_HELP = 0,
+	SPDK_APP_PARSE_ARGS_SUCCESS = 1,
+	SPDK_APP_PARSE_ARGS_FAIL = 2
+};
+typedef enum spdk_app_parse_args_rvals spdk_app_parse_args_rvals_t;
+
+/**
+ * Helper function for parsing arguments and printing usage messages.
+ *
+ * \param argc Count of arguments in argv parameter array.
+ * \param argv Array of command line arguments.
+ * \param opts Default options for the application.
+ * \param getopt_str String representing the app-specific command line parameters.
+ * Characters in this string must not conflict with characters in SPDK_APP_GETOPT_STRING.
+ * \param parse Function pointer to call if an argument in getopt_str is found.
+ * \param usage Function pointer to print usage messages for app-specific command
+ *		line parameters.
+ *\return SPDK_APP_PARSE_ARGS_FAIL on failure, SPDK_APP_PARSE_ARGS_SUCCESS on
+ *        success, SPDK_APP_PARSE_ARGS_HELP if '-h' passed as an option.
+ */
+spdk_app_parse_args_rvals_t spdk_app_parse_args(int argc, char **argv,
+		struct spdk_app_opts *opts, const char *getopt_str,
+		void (*parse)(int ch, char *arg), void (*usage)(void));
+
+/**
+ * Allocate an event to be passed to spdk_event_call().
+ *
+ * \param lcore Lcore to run this event.
+ * \param fn Function used to execute event.
+ * \param arg1 Argument passed to function fn.
+ * \param arg2 Argument passed to function fn.
+ *
+ * \return a pointer to the allocated event.
+ */
+struct spdk_event *spdk_event_allocate(uint32_t lcore, spdk_event_fn fn,
+				       void *arg1, void *arg2);
+
+/**
+ * Pass the given event to the associated lcore and call the function.
+ *
+ * \param event Event to execute.
+ */
+void spdk_event_call(struct spdk_event *event);
+
+/**
+ * Enable or disable monitoring of context switches.
+ *
+ * \param enabled True to enable, false to disable.
+ */
+void spdk_reactor_enable_context_switch_monitor(bool enabled);
+
+/**
+ * Return whether context switch monitoring is enabled.
+ *
+ * \return true if enabled or false otherwise.
+ */
+bool spdk_reactor_context_switch_monitor_enabled(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

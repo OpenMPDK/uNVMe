@@ -39,7 +39,7 @@
 #include "kvslab.h"
 #include "kvcache.h"
 
-#define MEMORY_ALIGNMENT (64)
+#define MEMORY_ALIGNMENT (256)
 
 static pthread_mutex_t *kvsl_slab_mutex;
 

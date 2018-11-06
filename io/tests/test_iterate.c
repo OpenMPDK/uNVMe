@@ -86,21 +86,27 @@ void validate_retrieved_value_length(kv_pair* kv){
 	assert(kv->value.length == TEST_VALUE_LENGTH(VALUE_LENGTH, idx));
 }
 
-void validate_iterate_read(uint8_t* key_exist, kv_iterate* it, int key_length, uint32_t prefix, int type){
+int validate_iterate_read(uint8_t* key_exist, kv_iterate* it, int key_length, uint32_t prefix, int type){
 	char* cur_key;
 	int idx = 0;
+	int num_keys = 0;
 
 	if (type == KV_KEY_ITERATE) {
 		char* key_buf = (char*)it->kv.value.value;
 		int key_buf_length = (int)it->kv.value.length;
 		if (!key_buf_length) {
-			return;
+			goto exit;
 		}
 
-		int num_keys = key_buf_length / key_length;
+		memcpy(&num_keys, key_buf, KV_IT_READ_BUFFER_META_LEN);
 
+		key_buf += KV_IT_READ_BUFFER_META_LEN;
 		for(int i = 0; i < num_keys; i++){
-			cur_key = key_buf + (i * key_length);
+			int cur_key_length;
+			memcpy(&cur_key_length, key_buf, KV_IT_READ_BUFFER_META_LEN);
+			assert(cur_key_length == key_length);
+
+			cur_key = key_buf + KV_IT_READ_BUFFER_META_LEN;
 			assert(memcmp(cur_key, &prefix, PREFIX_LENGTH) == 0);
 			idx = get_key_idx(cur_key);
 			if (key_exist[idx]) {
@@ -108,20 +114,12 @@ void validate_iterate_read(uint8_t* key_exist, kv_iterate* it, int key_length, u
 				//assert(0);
 			}
 			key_exist[idx]++;
+
+			key_buf += KV_IT_READ_BUFFER_META_LEN + key_length;
 		}
-	} else {//KV_KEY_ITERATE_WITH_RETRIEVE
-		if (!it->kv.key.length) {//iterate read success but no result.
-			return;
-		}
-		assert(memcmp(it->kv.key.key, &prefix, PREFIX_LENGTH) == 0);
-		idx = get_key_idx((char*)it->kv.key.key);
-		if (key_exist[idx]) {
-			printf("(key value it)duplicated key upcoming: prefix=0x%x, key=%u(%u)\n", prefix, idx, key_exist[idx]+1);
-			//assert(0);
-		}
-		key_exist[idx]++;
-		validate_retrieved_value_length(&it->kv);
 	}
+exit:
+	return num_keys;
 }
 
 void test_close_iterate_handle(uint64_t handle){
@@ -174,8 +172,6 @@ void test_repeat_get_iterate_info(uint64_t handle, int test_cnt){
 	uint32_t prefix;
 	uint32_t iterator;
 	uint8_t keyspace_id = KV_KEYSPACE_IODATA;
-        int type[] = {KV_KEY_ITERATE, KV_KEY_ITERATE_WITH_RETRIEVE, /*KV_KEY_ITERATE_WITH_DELETE*/};
-	int num_types = sizeof(type) / sizeof(type[0]);
         int nr_iterate_handle = 1;
 	int ret;
 
@@ -183,7 +179,7 @@ void test_repeat_get_iterate_info(uint64_t handle, int test_cnt){
 
         for(uint32_t i = 0; i < test_cnt; i++) {
                 // validate kv_iterate_info() when a iterator opened
-		int iterate_type = type[test_cnt % num_types];
+		int iterate_type = KV_KEY_ITERATE;
                 prefix = rand() & BIT_MASK;
                 iterator = kv_iterate_open(handle, keyspace_id, bitmask, prefix, iterate_type);
 		assert(iterator != KV_INVALID_ITERATE_HANDLE);
@@ -414,20 +410,10 @@ void test_iterate_read(uint64_t handle, uint32_t prefix, int key_length, int val
                 it->kv.param.io_option.iterate_read_option = KV_ITERATE_READ_DEFAULT;
                 ret = kv_iterate_read(handle, it);
 		
-		if (type == KV_KEY_ITERATE) {
-	                iterate_read_key_cnt += it->kv.value.length / key_length;
-		} else {
-			if (it->kv.key.length) {
-				iterate_read_key_cnt++;
-			}
-		}
-		
-                validate_iterate_read(key_exist, it, key_length, prefix, type);
+                iterate_read_key_cnt += validate_iterate_read(key_exist, it, key_length, prefix, type);
         }while(ret == KV_SUCCESS);
-	if (iterate_read_key_cnt != test_cnt) {
-		//assert(0);
-	}
-        assert(ret == KV_ERR_ITERATE_READ_EOF);
+	assert(ret == KV_ERR_ITERATE_READ_EOF);
+	assert(iterate_read_key_cnt == test_cnt);
 
         assert(kv_iterate_close(handle, iterator) == KV_SUCCESS);
 
@@ -479,7 +465,6 @@ void test_basic_io(uint64_t dev_handle, int test_cnt){
 	test_store(dev_handle, prefix, kv, key_length, value_length, test_cnt);
 	test_retrieve(dev_handle, prefix, kv, key_length, value_length, test_cnt);
 	test_iterate_read(dev_handle, prefix, key_length, value_length, test_cnt, KV_KEY_ITERATE);
-	test_iterate_read(dev_handle, prefix, key_length, value_length, test_cnt, KV_KEY_ITERATE_WITH_RETRIEVE);
 	test_delete(dev_handle, prefix, kv, key_length, test_cnt);
 
 	test_free_kv_pair(kv, test_cnt);
@@ -528,7 +513,7 @@ void test_multi_iterate(uint64_t dev_handle, int test_cnt){
 		p[i].key_length = key_length;
 		p[i].value_length = value_length;
 		p[i].test_cnt = test_cnt;
-		p[i].iterate_type = (i%2)?KV_KEY_ITERATE_WITH_RETRIEVE:KV_KEY_ITERATE;
+		p[i].iterate_type = KV_KEY_ITERATE;
 		p[i].tid = i;
 
 		assert(pthread_create(&t[i], NULL, iterate_read_thread, &p[i]) >= 0);

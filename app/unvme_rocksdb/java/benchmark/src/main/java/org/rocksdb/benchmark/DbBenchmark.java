@@ -1,7 +1,7 @@
 // Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-// This source code is licensed under the BSD-style license found in the
-// LICENSE file in the root directory of this source tree. An additional grant
-// of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 /**
  * Copyright (C) 2011 the original author or authors.
  * See the notice.md file distributed with this work for additional
@@ -582,12 +582,6 @@ public class DbBenchmark {
         (Integer)flags_.get(Flag.level0_slowdown_writes_trigger));
     options.setLevelZeroFileNumCompactionTrigger(
         (Integer)flags_.get(Flag.level0_file_num_compaction_trigger));
-    options.setSoftRateLimit(
-        (Double)flags_.get(Flag.soft_rate_limit));
-    options.setHardRateLimit(
-        (Double)flags_.get(Flag.hard_rate_limit));
-    options.setRateLimitDelayMaxMilliseconds(
-        (Integer)flags_.get(Flag.rate_limit_delay_max_milliseconds));
     options.setMaxCompactionBytes(
         (Long) flags_.get(Flag.max_compaction_bytes));
     options.setDisableAutoCompactions(

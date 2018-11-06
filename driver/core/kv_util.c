@@ -37,7 +37,7 @@
 void *kv_alloc(unsigned long long size) {
         void *ptr = NULL;
 
-        ptr = spdk_malloc(size, 0, NULL);
+        ptr = spdk_dma_malloc(size, 0, NULL);
 
         if(!ptr) {
                 KVNVME_ERR("Could not allocate the requested memory of size: %lld bytes", size);
@@ -52,7 +52,7 @@ void *kv_alloc(unsigned long long size) {
 void *kv_zalloc(unsigned long long size) {
         void *ptr = NULL;
 
-        ptr = spdk_zmalloc(size, 0, NULL);
+        ptr = spdk_dma_zmalloc(size, 0, NULL);
 
         if(!ptr) {
                 KVNVME_ERR("Could not allocate the requested memory of size: %lld bytes", size);
@@ -67,7 +67,7 @@ void *kv_zalloc(unsigned long long size) {
 void *kv_alloc_socket(unsigned long long size, int socket_id) {
         void* ptr = NULL;
 
-        ptr = spdk_malloc_socket(size, 0, NULL, socket_id);
+        ptr = spdk_dma_malloc_socket(size, 0, NULL, socket_id);
 
         if(!ptr) {
                 KVNVME_ERR("Could not allocate the requested memory of size: %lld bytes", size);
@@ -82,7 +82,7 @@ void *kv_alloc_socket(unsigned long long size, int socket_id) {
 void *kv_zalloc_socket(unsigned long long size, int socket_id) {
         void* ptr = NULL;
 
-        ptr = spdk_zmalloc_socket(size, 0, NULL, socket_id);
+        ptr = spdk_dma_zmalloc_socket(size, 0, NULL, socket_id);
 
         if(!ptr) {
                 KVNVME_ERR("Could not allocate the requested memory of size: %lld bytes", size);
@@ -95,12 +95,12 @@ void *kv_zalloc_socket(unsigned long long size, int socket_id) {
 }
 
 void kv_free(void *ptr) {
-	spdk_free(ptr);
+	spdk_dma_free(ptr);
 }
 
 
 void kv_nvme_sdk_info(void){
-        fprintf(stderr, "KV SDK info: buildtime=%s, hash=%s, os=%s, kernel=%s, processor=%s\n",
-		buildtime,hash,os,kernel,processor);
+        fprintf(stderr, "KV SDK info: buildtime=%s, hash=%s, os=%s, kernel=%s, processor=%s dpdk_version=%s spdk_version=%s\n",
+		buildtime,hash,os,kernel,processor,dpdk_version,spdk_version);
 }
 

@@ -59,9 +59,9 @@ typedef struct kv_nvme kv_nvme_t;
  */
 typedef struct nvme_dev_operations {
 	/** Pointer to the NVMe Write and Append Function */
-	int (*write)(kv_nvme_t *nvme, const kv_pair *kv, int core_id, uint8_t is_store);
+	int (*write)(kv_nvme_t *nvme, kv_pair *kv, int core_id, uint8_t is_store);
 	/** Pointer to the NVMe Write Async Function */
-	int (*write_async)(kv_nvme_t *nvme, const kv_pair *kv, int core_id);
+	int (*write_async)(kv_nvme_t *nvme, kv_pair *kv, int core_id);
 	/** Pointer to the NVMe Read Function */
 	int (*read)(kv_nvme_t *nvme, kv_pair *kv, int core_id);
 	/** Pointer to the NVMe Read Async Function */

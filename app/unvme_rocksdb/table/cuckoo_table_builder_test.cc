@@ -1,7 +1,7 @@
 // Copyright (c) 2011-present, Facebook, Inc. All rights reserved.
-// This source code is licensed under the BSD-style license found in the
-// LICENSE file in the root directory of this source tree. An additional grant
-// of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 
 #ifndef ROCKSDB_LITE
 
@@ -66,8 +66,8 @@ class CuckooBuilderTest : public testing::Test {
     ASSERT_EQ(expected_unused_bucket.substr(0,
           props->fixed_key_len), unused_key);
 
-    uint32_t value_len_found =
-      *reinterpret_cast<const uint32_t*>(props->user_collected_properties[
+    uint64_t value_len_found =
+      *reinterpret_cast<const uint64_t*>(props->user_collected_properties[
                 CuckooTablePropertyNames::kValueLength].data());
     ASSERT_EQ(values.empty() ? 0 : values[0].size(), value_len_found);
     ASSERT_EQ(props->raw_value_size, values.size()*value_len_found);
@@ -108,7 +108,7 @@ class CuckooBuilderTest : public testing::Test {
           std::find(expected_locations.begin(), expected_locations.end(), i) -
           expected_locations.begin();
       if (key_idx == keys.size()) {
-        // i is not one of the expected locaitons. Empty bucket.
+        // i is not one of the expected locations. Empty bucket.
         ASSERT_EQ(read_slice.compare(expected_unused_bucket), 0);
       } else {
         keys_found[key_idx] = true;
@@ -124,7 +124,7 @@ class CuckooBuilderTest : public testing::Test {
   std::string GetInternalKey(Slice user_key, bool zero_seqno) {
     IterKey ikey;
     ikey.SetInternalKey(user_key, zero_seqno ? 0 : 1000, kTypeValue);
-    return ikey.GetKey().ToString();
+    return ikey.GetInternalKey().ToString();
   }
 
   uint64_t NextPowOf2(uint64_t num) {

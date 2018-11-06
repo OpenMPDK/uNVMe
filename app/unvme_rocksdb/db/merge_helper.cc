@@ -1,7 +1,7 @@
 //  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-//  This source code is licensed under the BSD-style license found in the
-//  LICENSE file in the root directory of this source tree. An additional grant
-//  of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 
 #include "db/merge_helper.h"
 
@@ -9,12 +9,12 @@
 #include <string>
 
 #include "db/dbformat.h"
+#include "monitoring/perf_context_imp.h"
+#include "monitoring/statistics.h"
 #include "rocksdb/comparator.h"
 #include "rocksdb/db.h"
 #include "rocksdb/merge_operator.h"
 #include "table/internal_iterator.h"
-#include "util/perf_context_imp.h"
-#include "util/statistics.h"
 
 namespace rocksdb {
 
@@ -23,13 +23,19 @@ Status MergeHelper::TimedFullMerge(const MergeOperator* merge_operator,
                                    const std::vector<Slice>& operands,
                                    std::string* result, Logger* logger,
                                    Statistics* statistics, Env* env,
-                                   Slice* result_operand) {
+                                   Slice* result_operand,
+                                   bool update_num_ops_stats) {
   assert(merge_operator != nullptr);
 
   if (operands.size() == 0) {
     assert(value != nullptr && result != nullptr);
     result->assign(value->data(), value->size());
     return Status::OK();
+  }
+
+  if (update_num_ops_stats) {
+    MeasureTime(statistics, READ_NUM_MERGE_OPERANDS,
+                static_cast<uint64_t>(operands.size()));
   }
 
   bool success;

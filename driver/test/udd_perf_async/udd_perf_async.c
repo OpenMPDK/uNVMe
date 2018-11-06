@@ -40,6 +40,7 @@
 #include <unistd.h>
 #include <sys/time.h>
 
+
 #include "kv_types.h"
 #include "kvnvme.h"
 
@@ -61,34 +62,31 @@ unsigned int delete_complete_cnt = 0;
 
 void udd_write_cb(kv_pair *kv, unsigned int result, unsigned int status) {
 	if(status != KV_SUCCESS){
-		fprintf(stderr, "[%s] error. key=%s option=%d value.length=%d value.offset=%d status code=%d\n",
-			__FUNCTION__, (char*)kv->key.key, kv->param.io_option.store_option, kv->value.length, kv->value.offset, status);
-		exit(1);
+		fprintf(stderr, "[%s] error. key=%s option=%d value.length=%d value.actual_value_size=%d value.offset=%d status code=%d\n",
+			__FUNCTION__, (char*)kv->key.key, kv->param.io_option.store_option, kv->value.length, kv->value.actual_value_size, kv->value.offset, status);
+		//exit(1);
 	}
 	write_complete_cnt++;
 	struct time_stamp *stamp = kv->param.private_data;
 	gettimeofday(&stamp->end, NULL);
-//	printf("[%s] complete = %s length=%d\n", __FUNCTION__, (char*)kv->value.value, kv->value.length);
 }
 
 void udd_read_cb(kv_pair *kv, unsigned int result, unsigned int status) {
 	if(status != KV_SUCCESS){
-		fprintf(stderr, "[%s] error. key=%s option=%d value.length=%d value.offset=%d status code=%d\n",
-			__FUNCTION__, (char*)kv->key.key, kv->param.io_option.retrieve_option, kv->value.length, kv->value.offset, status);
-		exit(1);
+		fprintf(stderr, "[%s] error. key=%s option=%d value.length=%d value.actual_value_size=%d value.offset=%d status code=%d\n",
+			__FUNCTION__, (char*)kv->key.key, kv->param.io_option.retrieve_option, kv->value.length, kv->value.actual_value_size, kv->value.offset, status);
+		//exit(1);
 	}
 	read_complete_cnt++;
-	kv->value.length = result;
 	struct time_stamp *stamp = kv->param.private_data;
 	gettimeofday(&stamp->end, NULL);
-//	printf("[%s] complete = %s length=%d\n", __FUNCTION__, (char*)kv->value.value, kv->value.length);
 }
 
 void udd_delete_cb(kv_pair *kv, unsigned int result, unsigned int status) {
 	if(status != KV_SUCCESS){
 		fprintf(stderr, "[%s] error. key=%s option=%d value.length=%d value.offset=%d status code=%d\n",
 			__FUNCTION__, (char*)kv->key.key, kv->param.io_option.delete_option, kv->value.length, kv->value.offset, status);
-		exit(1);
+		//exit(1);
 	}
 	delete_complete_cnt++;
 	struct time_stamp *stamp = kv->param.private_data;
@@ -96,17 +94,17 @@ void udd_delete_cb(kv_pair *kv, unsigned int result, unsigned int status) {
 }
 
 int udd_perf_async() {
-	printf("%s start\n",__FUNCTION__);
+	fprintf(stderr, "%s start\n",__FUNCTION__);
 
 	int i;
 	int ret = -EINVAL;
 	//NOTE : check pci information first using lspci -v 
-	char *nvme_pci_dev = "0000:0a:00.0";
+	char *nvme_pci_dev = "0000:02:00.0";
 
-	int value_size = 4096;
-	int key_length = 16;
+	int value_size = 4096;	//NOTE: value_size: 0~2048KB
+	int key_length = 16;	//NOTE: key_length: 4~255B
 	int qid = DEFAULT_IO_QUEUE_ID;
-	unsigned int ssd_type = LBA_TYPE_SSD;
+	unsigned int ssd_type = KV_TYPE_SSD;
 	int insert_count = 10 * 10000;
 	int host_hash = 0;/* 0:NONE, 1: Hash128_1_P128, 2: Hash128_2_P128, 3: MurmurHash3_x64_128 */
 	int check_miscompare = 1;
@@ -133,6 +131,7 @@ int udd_perf_async() {
 
 	ret = kv_nvme_init(nvme_pci_dev, &options, ssd_type);
 	if(ret){
+		fprintf(stderr,"kv_nvme_init ret=%d\n",ret);
 		return ret;
 	}
 
@@ -143,6 +142,7 @@ int udd_perf_async() {
 
 	uint64_t handle = kv_nvme_open(nvme_pci_dev);
 	if(!handle){
+		fprintf(stderr,"kv_nvme_open handle=%ld\n",handle);
 		return ret;
 	}
 	gettimeofday(&end, NULL);
@@ -175,6 +175,7 @@ int udd_perf_async() {
 		if(kv) free(kv);
 		if(hash_value) free(hash_value);
 		if(stamps) free(stamps);
+		fprintf(stderr,"fail to alloc variables\n");
 		return -ENOMEM;
 	}
 
@@ -194,31 +195,54 @@ int udd_perf_async() {
 
 		//alloc pair
 		kv[i] = (kv_pair*)malloc(sizeof(kv_pair));
-		if(!kv[i])
+		if(!kv[i]){
+			fprintf(stderr,"fail to alloc kv pair\n");
 			return -ENOMEM;
+		}
 		kv[i]->keyspace_id = KV_KEYSPACE_IODATA;
-		kv[i]->value.value = kv_zalloc(value_size);
-		if(!kv[i]->value.value)
-			return -ENOMEM;
-		memset(kv[i]->value.value, 'a'+(i%26), value_size);
+		if(value_size){
+			int value_buffer_size = value_size;
+			if(value_size%4){
+				value_buffer_size += (4-value_size%4);
+			}
+			kv[i]->value.value = kv_zalloc(value_buffer_size);
+			if(!kv[i]->value.value){
+				fprintf(stderr,"fail to alloc value buffer\n");
+				return -ENOMEM;
+			}
+			memset(kv[i]->value.value, 'a'+(i%26), value_size);
+		}
+		else{
+			kv[i]->value.value = NULL;
+		}
 		kv[i]->value.length = value_size;
+		kv[i]->value.actual_value_size = 0;
 		kv[i]->value.offset = 0;
 
 		if(check_miscompare){
-			read(fd, kv[i]->value.value, value_size);
+			if(read(fd, kv[i]->value.value, value_size) != value_size){
+				fprintf(stderr,"fail to read miscompare value\n");
+				return -EIO;
+			}
 			Hash128_2_P128(kv[i]->value.value, value_size, seed, hash_value[i]);
 		}
 		//alloc key
-		kv[i]->key.key = malloc(key_length + 1);
-		if(!kv[i]->key.key)
+		int key_buffer_size = key_length;
+		if(key_length%4){
+			key_buffer_size += (4-key_length%4);
+		}
+		kv[i]->key.key = kv_zalloc(key_buffer_size);
+		if(!kv[i]->key.key){
+			fprintf(stderr,"fail to alloc key buffer\n");
 			return -ENOMEM;
+		}
 
 		kv[i]->key.length = key_length;
 		if (host_hash == 0) {
                        if(ssd_type == LBA_TYPE_SSD) {
                                *(uint64_t*)(kv[i]->key.key) = i * (value_size / SECTOR_SIZE);
                        } else {
-                               sprintf(kv[i]->key.key, "mountain%08x", i);
+                               memcpy(kv[i]->key.key, &i, MIN((size_t)key_length, sizeof(i)));
                        }
 		} else {
 			memcpy(kv[i]->key.key, hash_value[i], key_length);
@@ -272,7 +296,7 @@ int udd_perf_async() {
 		add_latency_stat(&stat, &stamps[i].start, &stamps[i].end);
 	}
 	show_elapsed_time(&start,&end, "kv_nvme_write_async", insert_count, value_size, &stat);
-	printf("Received Write Submit Count: %d, Write Complete Count: %d\n", write_submit_cnt, write_complete_cnt);
+	fprintf(stderr, "Received Write Submit Count: %d, Write Complete Count: %d\n", write_submit_cnt, write_complete_cnt);
 
 	//Prepare reading
 	for(i = 0; i < insert_count; i++){
@@ -304,7 +328,6 @@ int udd_perf_async() {
 				break;
 			}
 		}
-		//printf("value = %s\n", (char*)value[i - 1]->value);
 	}
 
 	while(read_complete_cnt < read_submit_cnt) {
@@ -328,7 +351,7 @@ int udd_perf_async() {
 			if (memcmp((void*)tmp_hash, (void*)hash_value[i],sizeof(tmp_hash)))
 				miscompare_cnt++;
 		}
-		printf("Miscompare count: %u\n", miscompare_cnt);
+		fprintf(stderr, "Miscompare count: %u\n", miscompare_cnt);
 	}
 
 	//Prepare deleting
@@ -382,7 +405,7 @@ int udd_perf_async() {
 			fprintf(stderr, "%d ", i);
 		}
 		if(kv[i]->value.value) kv_free(kv[i]->value.value);
-		if(kv[i]->key.key) free(kv[i]->key.key);
+		if(kv[i]->key.key) kv_free(kv[i]->key.key);
 		if(kv[i]) free(kv[i]);
 	}
 	free(kv);
@@ -400,12 +423,14 @@ int udd_perf_async() {
 	//Init Cache
 	gettimeofday(&start, NULL);
 	ret = kv_nvme_close(handle);
-	if(ret)
-		return ret;
+	if(ret){
+		fprintf(stderr,"kv_nvme_close ret=%d\n", ret);
+	}
 
 	ret = kv_nvme_finalize(nvme_pci_dev);
-	if(ret)
-		return ret;
+	if(ret){
+		fprintf(stderr,"kv_nvme_finalize ret=%d\n", ret);
+	}
 	gettimeofday(&end, NULL);
 	show_elapsed_time(&start, &end, "nvme_finalize", 0, 0, NULL);
 

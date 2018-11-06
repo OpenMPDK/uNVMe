@@ -1,7 +1,7 @@
 //  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-//  This source code is licensed under the BSD-style license found in the
-//  LICENSE file in the root directory of this source tree. An additional grant
-//  of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 
 #ifndef ROCKSDB_LITE
 
@@ -136,6 +136,8 @@ TEST_P(TransactionTest, DoubleEmptyWrite) {
 }
 
 TEST_P(TransactionTest, SuccessTest) {
+  ASSERT_OK(db->ResetStats());
+
   WriteOptions write_options;
   ReadOptions read_options;
   string value;
@@ -331,6 +333,43 @@ TEST_P(TransactionTest, SharedLocks) {
   txn1->Rollback();
   txn2->Rollback();
   txn3->Rollback();
+
+  // Test txn1 and txn2 sharing a lock and txn2 trying to upgrade lock.
+  s = txn1->GetForUpdate(read_options, "foo", nullptr, false /* exclusive */);
+  ASSERT_OK(s);
+
+  s = txn2->GetForUpdate(read_options, "foo", nullptr, false /* exclusive */);
+  ASSERT_OK(s);
+
+  s = txn2->GetForUpdate(read_options, "foo", nullptr);
+  ASSERT_TRUE(s.IsTimedOut());
+  ASSERT_EQ(s.ToString(), "Operation timed out: Timeout waiting to lock key");
+
+  txn1->UndoGetForUpdate("foo");
+  s = txn2->GetForUpdate(read_options, "foo", nullptr);
+  ASSERT_OK(s);
+
+  txn1->Rollback();
+  txn2->Rollback();
+
+  // Test txn1 trying to downgrade its lock.
+  s = txn1->GetForUpdate(read_options, "foo", nullptr, true /* exclusive */);
+  ASSERT_OK(s);
+
+  s = txn2->GetForUpdate(read_options, "foo", nullptr, false /* exclusive */);
+  ASSERT_TRUE(s.IsTimedOut());
+  ASSERT_EQ(s.ToString(), "Operation timed out: Timeout waiting to lock key");
+
+  // Should still fail after "downgrading".
+  s = txn1->GetForUpdate(read_options, "foo", nullptr, false /* exclusive */);
+  ASSERT_OK(s);
+
+  s = txn2->GetForUpdate(read_options, "foo", nullptr, false /* exclusive */);
+  ASSERT_TRUE(s.IsTimedOut());
+  ASSERT_EQ(s.ToString(), "Operation timed out: Timeout waiting to lock key");
+
+  txn1->Rollback();
+  txn2->Rollback();
 
   // Test txn1 holding an exclusive lock and txn2 trying to obtain shared
   // access.
@@ -1429,7 +1468,7 @@ TEST_P(TransactionTest, TwoPhaseLogRollingTest2) {
 
   // request a flush for all column families such that the earliest
   // alive log file can be killed
-  db_impl->TEST_MaybeFlushColumnFamilies();
+  db_impl->TEST_HandleWALFull();
   // log cannot be flushed because txn2 has not been commited
   ASSERT_TRUE(!db_impl->TEST_IsLogGettingFlushed());
   ASSERT_TRUE(db_impl->TEST_UnableToFlushOldestLog());
@@ -1444,7 +1483,7 @@ TEST_P(TransactionTest, TwoPhaseLogRollingTest2) {
   s = txn2->Commit();
   ASSERT_OK(s);
 
-  db_impl->TEST_MaybeFlushColumnFamilies();
+  db_impl->TEST_HandleWALFull();
   ASSERT_TRUE(!db_impl->TEST_UnableToFlushOldestLog());
 
   // we should see that cfb now has a flush requested
@@ -2072,6 +2111,7 @@ TEST_P(TransactionTest, ColumnFamiliesTest) {
   delete cfa;
   delete cfb;
   delete db;
+  db = nullptr;
 
   // open DB with three column families
   std::vector<ColumnFamilyDescriptor> column_families;
@@ -2088,6 +2128,7 @@ TEST_P(TransactionTest, ColumnFamiliesTest) {
 
   s = TransactionDB::Open(options, txn_db_options, dbname, column_families,
                           &handles, &db);
+  assert(db != nullptr);
   ASSERT_OK(s);
 
   Transaction* txn = db->BeginTransaction(write_options);
@@ -2769,10 +2810,12 @@ TEST_P(TransactionTest, LockLimitTest) {
   Status s;
 
   delete db;
+  db = nullptr;
 
   // Open DB with a lock limit of 3
   txn_db_options.max_num_locks = 3;
   s = TransactionDB::Open(options, txn_db_options, dbname, &db);
+  assert(db != nullptr);
   ASSERT_OK(s);
 
   // Create a txn and verify we can only lock up to 3 keys
@@ -3695,6 +3738,7 @@ TEST_P(TransactionTest, TimeoutTest) {
   Status s;
 
   delete db;
+  db = nullptr;
 
   // transaction writes have an infinite timeout,
   // but we will override this when we start a txn
@@ -3703,6 +3747,7 @@ TEST_P(TransactionTest, TimeoutTest) {
   txn_db_options.default_lock_timeout = -1;
 
   s = TransactionDB::Open(options, txn_db_options, dbname, &db);
+  assert(db != nullptr);
   ASSERT_OK(s);
 
   s = db->Put(write_options, "aaa", "aaa");
@@ -4469,6 +4514,35 @@ TEST_P(TransactionTest, TransactionStressTest) {
   // Verify that data is consistent
   Status s = RandomTransactionInserter::Verify(db, num_sets);
   ASSERT_OK(s);
+}
+
+TEST_P(TransactionTest, MemoryLimitTest) {
+  TransactionOptions txn_options;
+  // Header (12 bytes) + NOOP (1 byte) + 2 * 8 bytes for data.
+  txn_options.max_write_batch_size = 29;
+  string value;
+  Status s;
+
+  Transaction* txn = db->BeginTransaction(WriteOptions(), txn_options);
+  ASSERT_TRUE(txn);
+
+  ASSERT_EQ(0, txn->GetNumPuts());
+  ASSERT_LE(0, txn->GetID());
+
+  s = txn->Put(Slice("a"), Slice("...."));
+  ASSERT_OK(s);
+  ASSERT_EQ(1, txn->GetNumPuts());
+
+  s = txn->Put(Slice("b"), Slice("...."));
+  ASSERT_OK(s);
+  ASSERT_EQ(2, txn->GetNumPuts());
+
+  s = txn->Put(Slice("b"), Slice("...."));
+  ASSERT_TRUE(s.IsMemoryLimit());
+  ASSERT_EQ(2, txn->GetNumPuts());
+
+  txn->Rollback();
+  delete txn;
 }
 
 }  // namespace rocksdb

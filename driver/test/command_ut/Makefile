@@ -1,11 +1,11 @@
 ifeq ($(KV_DIR),)
-export KV_DIR = $(shell pwd)/../../
+export KV_DIR = $(shell pwd)/../../../.
 endif
 
-include $(KV_DIR)/mk/kv.dd.mk
-KV_DD_LIB += $(KV_DIR)/core/libkvnvmedd.a
+include $(KV_DIR)/mk/unvme.mk
+KV_DD_LIB += $(KV_DIR)/driver/core/libkvnvmedd.a
 
-C_SRCS := exist_append_iterate_getlog.c  $(COMMON_PATH)/kvutil.c $(COMMON_PATH)/EagleHashIP.c $(COMMON_PATH)/latency_stat.c
+C_SRCS := exist_append_iterate_getlog.c  $(COMMON_INCLUDE)/kvutil.c $(COMMON_INCLUDE)/EagleHashIP.c $(COMMON_INCLUDE)/latency_stat.c
 
 LIBS += $(KV_DD_LIB) $(KV_LIBS)
 

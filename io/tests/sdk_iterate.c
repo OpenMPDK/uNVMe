@@ -52,7 +52,7 @@
 }while(0)
 
 int sdk_iterate(void){
-	printf("%s start\n",__FUNCTION__);
+	fprintf(stderr,"%s start\n",__FUNCTION__);
 
 	srand(time(NULL)); //for random prefix
 	int key_length = 16;
@@ -71,6 +71,10 @@ int sdk_iterate(void){
 	kv_sdk sdk_opt;
 	memset(&sdk_opt,0, sizeof(kv_sdk));
 	strcpy(sdk_opt.dev_id[0], "0000:02:00.0");
+	sdk_opt.dd_options[0].core_mask = 0x1;
+	sdk_opt.dd_options[0].sync_mask = 0x1;
+	sdk_opt.dd_options[0].cq_thread_mask = 0x2;
+
 	sdk_opt.ssd_type=KV_TYPE_SSD;
 	ret = kv_sdk_init(KV_SDK_INIT_FROM_STR, &sdk_opt);
 	fail_unless(ret == KV_SUCCESS);
@@ -114,10 +118,10 @@ int sdk_iterate(void){
 	kv_iterate* it = (kv_iterate*)malloc(sizeof(kv_iterate));
 	fail_unless(it != NULL);
 	it->iterator = KV_INVALID_ITERATE_HANDLE;
-	it->kv.key.key = malloc(key_length + 1);
+	it->kv.key.key = malloc(key_length);
 	fail_unless(it->kv.key.key != NULL);
 	it->kv.key.length = key_length;
-	memset(it->kv.key.key, 0, it->kv.key.length + 1);
+	memset(it->kv.key.key, 0, it->kv.key.length);
 
 	it->kv.value.value = malloc(iterate_buffer_size);
 	fail_unless(it->kv.value.value != NULL);
@@ -131,18 +135,22 @@ int sdk_iterate(void){
 
 	//SDK Write
 	fprintf(stderr,"kv_store: ");
+	for(i=0;i<insert_count;i++){
+		memset(kv[i]->key.key, 0, key_length);
+		memcpy(kv[i]->key.key + ((size_t)key_length > sizeof(int) ? (key_length - sizeof(i)) : 0), &i, MIN((size_t)key_length, sizeof(int)));
+		kv[i]->key.length = key_length;
+		kv[i]->param.io_option.store_option = KV_STORE_DEFAULT;
+		kv[i]->param.private_data = NULL;
+		kv[i]->param.async_cb = NULL;
+	}
+
 	gettimeofday(&start, NULL);
 	for(i=0;i<insert_count;i++){
 		if(!(i%10000)){
 			fprintf(stderr,"%d ", i);
 		}
-		sprintf(kv[i]->key.key, "%04x%012x", key_prefix, i);
-		kv[i]->key.length = key_length;
-		kv[i]->param.io_option.store_option = KV_STORE_DEFAULT;
-		kv[i]->param.private_data = NULL;
-		kv[i]->param.async_cb = NULL;
 		fail_unless(kv_store(handle, kv[i]) == KV_SUCCESS);
-		//printf("WRITE k=%s v=%s\n",(char*)kv[i]->key.key,(char*)kv[i]->value.value);
+		//fprintf(stderr,"WRITE k=%s v=%s\n",(char*)kv[i]->key.key,(char*)kv[i]->value.value);
 	}
 	gettimeofday(&end, NULL);
 	fprintf(stderr,"Done\n");
@@ -150,18 +158,22 @@ int sdk_iterate(void){
 
 	//SDK Read
 	fprintf(stderr,"kv_retrieve: ");
+	for(i=0;i<insert_count;i++){
+		memset(kv[i]->key.key, 0, key_length);
+		memcpy(kv[i]->key.key + ((size_t)key_length > sizeof(int) ? (key_length - sizeof(i)) : 0), &i, MIN((size_t)key_length, sizeof(int)));
+		kv[i]->key.length = key_length;
+		kv[i]->param.io_option.retrieve_option = KV_RETRIEVE_DEFAULT;
+		kv[i]->param.private_data = NULL;
+		kv[i]->param.async_cb = NULL;
+	}
+
 	gettimeofday(&start, NULL);
 	for(i=0;i<insert_count;i++){
 		if(!(i%10000)){
 			fprintf(stderr,"%d ",i);
 		}
-		sprintf(kv[i]->key.key, "%04x%012x", key_prefix, i);
-		kv[i]->key.length = key_length;
-		kv[i]->param.io_option.retrieve_option = KV_RETRIEVE_DEFAULT;
-		kv[i]->param.private_data = NULL;
-		kv[i]->param.async_cb = NULL;
 		fail_unless(kv_retrieve(handle, kv[i]) == KV_SUCCESS);
-		//printf("READ k=%s v=%s\n",(char*)kv[i]->key.key,(char*)kv[i]->value.value);
+		//fprintf(stderr,"READ k=%s v=%s\n",(char*)kv[i]->key.key,(char*)kv[i]->value.value);
 	}
 	gettimeofday(&end, NULL);
 	fprintf(stderr,"Done\n");
@@ -174,7 +186,7 @@ int sdk_iterate(void){
 	memset((char*)&info,0,sizeof(info));
         ret = kv_iterate_info(handle, info, nr_iterate_handle);
         if(ret == KV_SUCCESS){
-                printf("iterate_handle count=%d\n",nr_iterate_handle);
+                fprintf(stderr,"iterate_handle count=%d\n",nr_iterate_handle);
                 for(i=0;i<nr_iterate_handle;i++){
                         fprintf(stderr, "Retrieve iterate_handle_info[%d] : info.handle_id=%d info.status=%d info.type=%d info.keyspace_id=%d info.prefix=%08x info.bitmask=%08x info.is_eof=%d\n",
                                 i+1, info[i].handle_id, info[i].status, info[i].type, info[i].keyspace_id, info[i].prefix, info[i].bitmask, info[i].is_eof);
@@ -209,13 +221,14 @@ int sdk_iterate(void){
 	}
 
         show_elapsed_time(&start,&end,"kv_iterate_open",1, 0, NULL);
-        if(iterator != KV_INVALID_ITERATE_HANDLE){
+        if(iterator != KV_INVALID_ITERATE_HANDLE && iterator != KV_ERR_ITERATE_ERROR){
 		fprintf(stderr,"Iterate open success : iterator id=%d\n", iterator);
 		int num_keys_read = 0;
 		int it_read_success_count = 0;
                 gettimeofday(&start, NULL);
 		do{
 			int request_read_size = iterate_buffer_size;
+			int cur_num_keys_read = 0;
                         it->iterator = iterator;
 			it->kv.keyspace_id = 0;
                         it->kv.param.io_option.iterate_read_option = KV_ITERATE_READ_DEFAULT;
@@ -226,11 +239,11 @@ int sdk_iterate(void){
 			fprintf(stderr,"Iterate Read Request=%d\n",it->kv.value.length);
 			ret = kv_iterate_read(handle, it);
                         fprintf(stderr,"Iterate Read Result: it->kv.key.length=%d it->kv.value.length=%d ret=0x%x\n", it->kv.key.length, it->kv.value.length, ret);
-                        fprintf(stderr,"Iterate Read Result: it->kv.key.key=%s it->kv.value.value=%s\n", (char*)it->kv.key.key, (char*)it->kv.value.value);
 
 			//KV_KEY_ITERATE case
 			if(it->kv.key.length == 0 && it->kv.value.length > 0){
-				num_keys_read += it->kv.value.length / key_length;
+				memcpy(&cur_num_keys_read, it->kv.value.value, KV_IT_READ_BUFFER_META_LEN);
+				num_keys_read += cur_num_keys_read;
 			}
 
 			if(ret == KV_SUCCESS){
@@ -263,16 +276,20 @@ int sdk_iterate(void){
 finalize:
 	//SDK Delete
 	fprintf(stderr,"kv_delete: ");
+	for(i=0;i<insert_count;i++){
+		memset(kv[i]->key.key, 0, key_length);
+		memcpy(kv[i]->key.key + ((size_t)key_length > sizeof(int) ? (key_length - sizeof(i)) : 0), &i, MIN((size_t)key_length, sizeof(int)));
+		kv[i]->key.length = key_length;
+		kv[i]->param.io_option.delete_option = KV_DELETE_DEFAULT;
+		kv[i]->param.private_data = NULL;
+		kv[i]->param.async_cb = NULL;
+	}
+
 	gettimeofday(&start, NULL);
 	for(i=0;i<insert_count;i++){
 		if(!(i%10000)){
 			fprintf(stderr,"%d ",i);
 		}
-		sprintf(kv[i]->key.key, "%04x%012x", key_prefix, i);
-		kv[i]->key.length = key_length;
-		kv[i]->param.io_option.delete_option = KV_DELETE_DEFAULT;
-		kv[i]->param.private_data = NULL;
-		kv[i]->param.async_cb = NULL;
 		fail_unless(0 == kv_delete(handle, kv[i]));
 	}
 	gettimeofday(&end, NULL);

@@ -41,19 +41,23 @@
 #include "fio.h"
 #include "optgroup.h"
 
-#define KEY_LENGTH (16)
+#define DEFAULT_KEY_SIZE ("16")
 #define REDUNDANT_MEM_SIZE (256ULL*1024*1024)
 #define MEM_ALIGN(d, n) ((size_t)(((d) + (n - 1)) & ~(n - 1)))
+#define PTR_ALIGN(ptr, mask)    \
+        (char *) (((uintptr_t) (ptr) + (mask)) & ~(mask))
 #define MIN(a,b) ((a)<(b)?(a):(b))
 #define MAX(a,b) ((a)>(b)?(a):(b))
 #define CHECK_FIO_VERSION(a,b) (((a)*100) + (b))
+#define ZERO_VALUE_MAGICNUM (777)
 
 
 struct kv_fio_request {
 	struct io_u             *io;
 	struct kv_fio_thread    *fio_thread;
 	kv_pair                 kv;
-	uint8_t                 key[KEY_LENGTH + 1];
+	uint8_t                 *key;
+	uint16_t		key_size;
 };
 
 struct kv_dev_info {
@@ -76,12 +80,14 @@ struct kv_fio_thread {
 	int			core_id;		// core id for io threads
 	int			fio_q_finished;		// return values when kv_fio_queue finished
 	int			qid;			// qpair id for io
+	uint16_t		key_size;		// (KV) key length
 	struct kv_dev_info	*dev_info;		// devices' information of given io job(thread)
 };
 
-struct kv_fio_options { //fio options
-        void    *pad;
-        char    *json_path;
+struct kv_fio_engine_options { //fio options
+        void    	*pad;
+        char    	*json_path;
+        uint16_t    	key_size;
 };
 
 static struct fio_option options[] = {
@@ -89,8 +95,18 @@ static struct fio_option options[] = {
                 .name   = "json_path",
                 .lname  = "configuration file path",
                 .type   = FIO_OPT_STR_STORE,
-                .off1   = offsetof(struct kv_fio_options, json_path),
+                .off1   = offsetof(struct kv_fio_engine_options, json_path),
                 .help   = "JSON formmatted configuration file path",
+                .category = FIO_OPT_C_ENGINE,
+        },
+        {
+                .name   = "ks",
+                .lname  = "key size for KV SSD",
+                .alias	= "keysize",
+                .type   = FIO_OPT_INT,
+                .off1   = offsetof(struct kv_fio_engine_options, key_size),
+                .def	= DEFAULT_KEY_SIZE,
+                .help   = "Key size of KV pairs (valid only for KV SSD)",
                 .category = FIO_OPT_C_ENGINE,
         },
         {
@@ -101,9 +117,9 @@ static struct fio_option options[] = {
 static int td_count;
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static kv_sdk g_sdk_opt = {0, };
-static uint32_t g_numjobs_possible;
+static uintptr_t g_page_mask;
 
-int (*kv_fio_write) (uint64_t handle, int qid, const kv_pair *kv);
+int (*kv_fio_write) (uint64_t handle, int qid, kv_pair *kv);
 int (*kv_fio_read) (uint64_t handle, int qid, kv_pair *kv);
 
 void increase_iocq_head(struct kv_fio_thread *f)
@@ -145,12 +161,6 @@ static void kv_fio_set_io_function(struct thread_data *td)
 		kv_fio_write = kv_nvme_write;
 		kv_fio_read = kv_nvme_read;
 	}
-}
-
-static void remove_white_space(char *arg)
-{
-	char *tmp_ptr = arg;
-	while((*(arg+=!isspace(*tmp_ptr++)) = *tmp_ptr));
 }
 
 static void kv_fio_option_check(struct thread_data *td)
@@ -245,13 +255,20 @@ static int kv_fio_get_core_and_qid_for_io_thread(struct kv_fio_thread *fio_threa
 	return core_id;
 }
 
+static unsigned int kv_fio_max_bs(struct thread_data *td)
+{
+	unsigned int max_bs;
+	max_bs = max(td->o.max_bs[DDIR_READ], td->o.max_bs[DDIR_WRITE]);
+	return max(td->o.max_bs[DDIR_TRIM], max_bs);
+}
+
 static uint64_t kv_fio_calc_hugemem_size(struct thread_data *td)
 {
 	uint64_t max_block_size, total_io_block_size;
 
-	max_block_size = MAX(MAX(td->o.max_bs[DDIR_WRITE], td->o.max_bs[DDIR_READ]), td->o.max_bs[DDIR_TRIM]);
+	max_block_size = kv_fio_max_bs(td);
 	total_io_block_size = (max_block_size * td->o.iodepth * td->o.numjobs);
-	return total_io_block_size + REDUNDANT_MEM_SIZE;
+	return total_io_block_size + REDUNDANT_MEM_SIZE; //redundant hugemem for key alloc, etc.
 }
 
 static int kv_fio_setup(struct thread_data *td)
@@ -260,6 +277,7 @@ static int kv_fio_setup(struct thread_data *td)
 
 	struct kv_fio_thread *fio_thread;
 	struct fio_file *f;
+	struct kv_fio_engine_options *engine_option = td->eo;
 	unsigned int i;
 
 	pthread_mutex_lock(&mutex);
@@ -270,9 +288,15 @@ static int kv_fio_setup(struct thread_data *td)
 		fprintf(stderr, "unvme2_fio_plugin is built with fio version=%d.%d\n",FIO_MAJOR_VERSION, FIO_MINOR_VERSION);
 		kv_sdk_info();
 
-		struct kv_fio_options *o = td->eo;
-		assert(o->json_path != NULL);
-		ret = kv_fio_parse_config_file(o->json_path, td);
+		assert(engine_option->json_path != NULL);
+
+		if (engine_option->key_size < KV_MIN_KEY_LEN || engine_option->key_size > KV_MAX_KEY_LEN) {
+			fprintf(stderr, "keysize(%u) should be between %u and %u.\n", \
+					engine_option->key_size, KV_MIN_KEY_LEN, KV_MAX_KEY_LEN);
+		}
+		assert((engine_option->key_size >= KV_MIN_KEY_LEN) && (engine_option->key_size <= KV_MAX_KEY_LEN));
+
+		ret = kv_fio_parse_config_file(engine_option->json_path, td);
 		assert(ret == KV_SUCCESS);
 
 		g_sdk_opt.app_hugemem_size = kv_fio_calc_hugemem_size(td);
@@ -280,6 +304,10 @@ static int kv_fio_setup(struct thread_data *td)
 		assert(ret == KV_SUCCESS);
 
 		kv_fio_set_io_function(td);
+
+		uintptr_t page_size = sysconf(_SC_PAGESIZE);
+		assert(page_size > 0);
+		g_page_mask = page_size - 1;
 	}
 
 	// set thread data
@@ -357,6 +385,12 @@ static int kv_fio_setup(struct thread_data *td)
 
 	fio_thread->ssd_type = g_sdk_opt.ssd_type; // this affects key generation
 
+	if (fio_thread->ssd_type == KV_TYPE_SSD) {
+		fio_thread->key_size = engine_option->key_size;
+	} else {
+		fio_thread->key_size = atoi(DEFAULT_KEY_SIZE);
+	}
+
 	// for io job information
 	struct kv_dev_info *tmpinfo = fio_thread->dev_info;
 	fprintf(stderr, "job %u will generate IO to the devices below(at core %u)\n", td_count, fio_thread->core_id);
@@ -396,7 +430,7 @@ static int kv_fio_close(struct thread_data *td, struct fio_file *f)
 static int kv_fio_iomem_alloc(struct thread_data *td, size_t total_mem)
 {
 	size_t aligned_total_mem = MEM_ALIGN(total_mem, 4*1024); // 4KB aligned size
-	td->orig_buffer = kv_zalloc(aligned_total_mem);
+	td->orig_buffer = kv_zalloc(aligned_total_mem + 4*1024); // alloc 4KB more for aligning io_u buf
 	return td->orig_buffer == NULL;
 }
 
@@ -414,12 +448,31 @@ static int kv_fio_io_u_init(struct thread_data *td, struct io_u *io_u)
 #endif
 	struct kv_fio_request	*fio_req;
 
+	unsigned int aligned_max_bs = MEM_ALIGN(kv_fio_max_bs(td), 4); // dword(4B) aligned
+	char *orig_buffer;
+
 	fio_req = calloc(1, sizeof(*fio_req));
 	if (fio_req == NULL) {
 		return 1;
 	}
+
+	if (td->o.odirect || td->o.mem_align || td->o.oatomic ||
+#if (CHECK_FIO_VERSION(FIO_MAJOR_VERSION, FIO_MINOR_VERSION) >= CHECK_FIO_VERSION(2,14))
+	  td_ioengine_flagged(td, FIO_RAWIO)) {
+#else
+	  td->io_ops->flags & FIO_RAWIO) {
+#endif
+		orig_buffer = PTR_ALIGN(td->orig_buffer, g_page_mask) + td->o.mem_align;
+	} else {
+		orig_buffer = td->orig_buffer;
+	}
+	io_u->buf = orig_buffer + (io_u->index * aligned_max_bs);
+
 	fio_req->io = io_u;
 	fio_req->fio_thread = fio_thread;
+	fio_req->key_size = fio_thread->key_size;
+	fio_req->key = kv_zalloc(MEM_ALIGN(fio_req->key_size, 4)); //for long key support
+	assert(fio_req->key != NULL);
 
 	io_u->engine_data = fio_req;
 
@@ -432,6 +485,7 @@ static void kv_fio_io_u_free(struct thread_data *td, struct io_u *io_u)
 
 	if (fio_req) {
 		assert(fio_req->io == io_u);
+		kv_free(fio_req->key);
 		free(fio_req);
 		io_u->engine_data = NULL;
 	}
@@ -477,20 +531,26 @@ static int kv_fio_queue(struct thread_data *td, struct io_u *io_u)
 		return FIO_Q_COMPLETED;
 	}
 
-	if(fio_thread->ssd_type == LBA_TYPE_SSD) {
-		*(uint64_t*)(fio_req->key) = io_u->offset / sector_size; //lba addr
-	} else { // KV_TYPE_SSD
-		snprintf((char*)fio_req->key, KEY_LENGTH+1, "%016llu", io_u->offset / io_u->xfer_buflen);
-	}
-
 	kv_pair* kv = &fio_req->kv;
-	kv->key.key = fio_req->key;
-	kv->key.length = KEY_LENGTH;
+	kv->key.length = fio_req->key_size;
 	kv->keyspace_id = KV_KEYSPACE_IODATA;
 
 	kv->value.value = io_u->buf;
 	kv->value.length = io_u->xfer_buflen;
+	kv->value.actual_value_size = 0;
 	kv->value.offset = 0;
+
+	if(fio_thread->ssd_type == LBA_TYPE_SSD) {
+		uint64_t lba = io_u->offset / sector_size; //lba addr
+		memcpy(fio_req->key, &lba, sizeof(uint64_t));
+	} else { // KV_TYPE_SSD
+		uint64_t _key = io_u->offset / io_u->xfer_buflen;
+		memcpy(fio_req->key, &_key, MIN(kv->key.length, sizeof(uint64_t)));
+		if (io_u->xfer_buflen == ZERO_VALUE_MAGICNUM) {
+			kv->value.length = 0;
+		}
+	}
+	kv->key.key = fio_req->key;
 
 	if (is_async(td)) {
 		kv->param.async_cb = kv_fio_completion_cb;
@@ -507,7 +567,8 @@ static int kv_fio_queue(struct thread_data *td, struct io_u *io_u)
 		ret = kv_fio_write(handle, fio_thread->qid, kv);
 		break;
 	default: // NOT support DDIR_TRIM, DDIR_SYNC, DDIR_DATASYNC
-		break;
+		//break;
+		return FIO_Q_COMPLETED;
 	}
 
 	return (ret) ? FIO_Q_BUSY : fio_thread->fio_q_finished;
@@ -623,5 +684,5 @@ struct ioengine_ops ioengine = {
 	.flags			= FIO_RAWIO | FIO_NOEXTEND | FIO_NODISKUTIL | FIO_MEMALIGN,
 
         .options                = options,
-        .option_struct_size     = sizeof(struct kv_fio_options),
+        .option_struct_size     = sizeof(struct kv_fio_engine_options),
 };

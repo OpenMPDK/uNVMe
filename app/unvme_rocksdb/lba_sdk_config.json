@@ -10,11 +10,11 @@
  "log_file" : "/tmp/kvsdk.log",
   "device_description" : [
     {
-      "dev_id" : "0000:0a:00.0",
+      "dev_id" : "0000:c1:00.0",
       "core_mask" : 1,
       "sync_mask" : 0,
       "cq_thread_mask" : 0,
-      "queue_depth" : 2048
+      "queue_depth" : 256
     }
   ]
 }

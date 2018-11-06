@@ -6,6 +6,8 @@ extern const char* hash;
 extern const char* os;
 extern const char* processor;
 extern const char* kernel;
+extern const char* dpdk_version;
+extern const char* spdk_version;
 
 #endif
 

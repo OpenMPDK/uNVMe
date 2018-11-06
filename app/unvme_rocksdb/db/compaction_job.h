@@ -1,7 +1,7 @@
 //  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-//  This source code is licensed under the BSD-style license found in the
-//  LICENSE file in the root directory of this source tree. An additional grant
-//  of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 //
 // Copyright (c) 2011 The LevelDB Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -29,6 +29,7 @@
 #include "db/version_edit.h"
 #include "db/write_controller.h"
 #include "db/write_thread.h"
+#include "options/db_options.h"
 #include "port/port.h"
 #include "rocksdb/compaction_filter.h"
 #include "rocksdb/compaction_job_stats.h"
@@ -38,7 +39,6 @@
 #include "rocksdb/transaction_log.h"
 #include "table/scoped_arena_iterator.h"
 #include "util/autovector.h"
-#include "util/db_options.h"
 #include "util/event_logger.h"
 #include "util/stop_watch.h"
 #include "util/thread_local.h"

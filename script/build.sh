@@ -78,27 +78,28 @@ build_all(){
 }
 
 build_intel(){
-	log_normal "[Build dpdk - $MPDK_TARGET]"
-	cd driver/external/dpdk
+	log_normal "[Build $DPDK_PATH - $MPDK_TARGET]"
+	cd driver/external/$DPDK_PATH
 	make install T=$MPDK_TARGET EXTRA_CFLAGS="-fPIC" DESTDIR=. -j 4
 	ret=$?
 	cd ../../..
 	if [ $ret = 0 ]; then
-		log_normal "[Build dpdk - $MPDK_TARGET].. Done"
+		log_normal "[Build $DPDK_PATH - $MPDK_TARGET].. Done"
 	else
-		log_error "[Build dpdk - $MPDK_TARGET].. Error"
+		log_error "[Build $DPDK_PATH - $MPDK_TARGET].. Error"
 	fi
 
 	
-	log_normal "[Build spdk]"
-	cd driver/external/spdk
-	make DPDK_DIR=../dpdk/$MPDK_TARGET -j 4
+	log_normal "[Build $SPDK_PATH]"
+	cd driver/external/$SPDK_PATH
+	./configure --with-dpdk=../$DPDK_PATH
+	make -j 4
 	ret=$?
 	cd ../../..
 	if [ $ret = 0 ]; then
-		log_normal "[Build spdk].. Done"
+		log_normal "[Build $SPDK_PATH].. Done"
 	else
-		log_error "[Build spdk].. Error"
+		log_error "[Build $SPDK_PATH].. Error"
 	fi
 	return $ret
 }
@@ -187,6 +188,19 @@ build_app(){
 		fi
 	fi
 
+	if [ -d "blob_cli" ]; then
+		log_normal "[Build App - blob_cli]"
+		cd blob_cli
+		make
+		ret=$?
+		cd ..
+		if [ $ret = 0 ]; then
+			log_normal "[Build App - blob_cli].. Done"
+		else
+			log_error "[Build App - blob_cli].. Error"
+		fi
+	fi
+
 	cd ..
 	return $ret
 }
@@ -215,7 +229,7 @@ build_analysis(){
 
 	log_normal "[Build spdk]"
 	cd driver/external/spdk/lib/nvme
-	make clean && make DPDK_DIR=../../../dpdk/x86_64-native-linuxapp-gcc/ -j 4
+	make clean && make DPDK_DIR=../../../$DPDK_PATH/$MPDK_TARGET/ -j 4
 	ret=$?
 	cd ..
 	if [ $ret = 0 ]; then
@@ -261,18 +275,18 @@ clean(){
 }
 
 intel_clean(){
-	log_normal "[Clean dpdk]"
-	cd driver/external/dpdk
+	log_normal "[Clean $DPDK_PATH]"
+	cd driver/external/$DPDK_PATH
 	rm -rf $MPDK_TARGET
-	find . -name "*.a" | xargs rm	
+	find . -name "*.a" | xargs rm -f
 	cd ../../..
-	log_normal "Clean dpdk].. Done"
+	log_normal "Clean $DPDK_PATH].. Done"
 
-	log_normal "[Clean spdk]"
-	cd driver/external/spdk
+	log_normal "[Clean $SPDK_PATH]"
+	cd driver/external/$SPDK_PATH
 	make clean
 	cd ../../..
-	log_normal "[Clean spdk].. Done"
+	log_normal "[Clean $SPDK_PATH].. Done"
 }
 
 build_mpdk(){
@@ -284,10 +298,12 @@ build_mpdk(){
 	cd $mpdk_dir/$prefix
 	rm -rf app/kv_fatcache
 	rm -rf app/kv_rocksdb
-	#rm -rf app/nvme_cli
+	rm -rf app/nvme_cli
 	#rm -rf app/mkfs
 	#rm -rf app/fuse
 	#rm -rf app/unvme_rocksdb
+	rm -rf app/blob_cli
+	rm -rf app/blobfs_perf
 	rm -rf app/external/performance/script/memtier_benchmark
 	rm -rf app/external/performance
 	rm -rf app/external/twemperf
@@ -295,7 +311,6 @@ build_mpdk(){
 	rm -rf app/external/rocksdb_5.3.0
 	rm -rf app/external/fatcache_0.1.0
 
-	rm -rf driver/external/dpdk-17.11
 	rm -rf driver/external/rocksdb
 	rm -rf driver/external/rocksdb-5.3.3
 	rm -rf driver/external/srandom
@@ -313,6 +328,7 @@ build_mpdk(){
 	rm -rf io/tests/test_json.c
 
 	rm -rf patch
+	rm -rf script/fortify.sh
 	
 	ret=$?
 	if [ $ret = 0 ]; then

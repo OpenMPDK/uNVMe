@@ -1,7 +1,7 @@
 //  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-//  This source code is licensed under the BSD-style license found in the
-//  LICENSE file in the root directory of this source tree. An additional grant
-//  of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 //
 // Copyright (c) 2011 The LevelDB Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -20,6 +20,34 @@ namespace rocksdb {
 class DBIteratorTest : public DBTestBase {
  public:
   DBIteratorTest() : DBTestBase("/db_iterator_test") {}
+};
+
+class FlushBlockEveryKeyPolicy : public FlushBlockPolicy {
+ public:
+  virtual bool Update(const Slice& key, const Slice& value) override {
+    if (!start_) {
+      start_ = true;
+      return false;
+    }
+    return true;
+  }
+ private:
+  bool start_ = false;
+};
+
+class FlushBlockEveryKeyPolicyFactory : public FlushBlockPolicyFactory {
+ public:
+  explicit FlushBlockEveryKeyPolicyFactory() {}
+
+  const char* Name() const override {
+    return "FlushBlockEveryKeyPolicyFactory";
+  }
+
+  FlushBlockPolicy* NewFlushBlockPolicy(
+    const BlockBasedTableOptions& table_options,
+    const BlockBuilder& data_block_builder) const override {
+    return new FlushBlockEveryKeyPolicy;
+  }
 };
 
 TEST_F(DBIteratorTest, IteratorProperty) {
@@ -944,11 +972,11 @@ TEST_F(DBIteratorTest, DBIteratorBoundTest) {
     ASSERT_TRUE(iter->Valid());
     ASSERT_EQ(iter->key().compare(("b1")), 0);
 
-    perf_context.Reset();
+    get_perf_context()->Reset();
     iter->Next();
 
     ASSERT_TRUE(iter->Valid());
-    ASSERT_EQ(static_cast<int>(perf_context.internal_delete_skipped_count), 2);
+    ASSERT_EQ(static_cast<int>(get_perf_context()->internal_delete_skipped_count), 2);
 
     // now testing with iterate_bound
     Slice prefix("c");
@@ -956,7 +984,7 @@ TEST_F(DBIteratorTest, DBIteratorBoundTest) {
 
     iter.reset(db_->NewIterator(ro));
 
-    perf_context.Reset();
+    get_perf_context()->Reset();
 
     iter->Seek("b");
     ASSERT_TRUE(iter->Valid());
@@ -971,16 +999,61 @@ TEST_F(DBIteratorTest, DBIteratorBoundTest) {
     // even though the key is deleted
     // hence internal_delete_skipped_count should be 0
     ASSERT_TRUE(!iter->Valid());
-    ASSERT_EQ(static_cast<int>(perf_context.internal_delete_skipped_count), 0);
+    ASSERT_EQ(static_cast<int>(get_perf_context()->internal_delete_skipped_count), 0);
   }
 }
 
+TEST_F(DBIteratorTest, DBIteratorBoundOptimizationTest) {
+  int upper_bound_hits = 0;
+  Options options = CurrentOptions();
+  rocksdb::SyncPoint::GetInstance()->SetCallBack(
+      "BlockBasedTable::BlockEntryIteratorState::KeyReachedUpperBound",
+      [&upper_bound_hits](void* arg) {
+        assert(arg != nullptr);
+        upper_bound_hits += (*static_cast<bool*>(arg) ? 1 : 0);
+      });
+  rocksdb::SyncPoint::GetInstance()->EnableProcessing();
+  options.env = env_;
+  options.create_if_missing = true;
+  options.prefix_extractor = nullptr;
+  BlockBasedTableOptions table_options;
+  table_options.flush_block_policy_factory =
+    std::make_shared<FlushBlockEveryKeyPolicyFactory>();
+  options.table_factory.reset(NewBlockBasedTableFactory(table_options));
+
+  DestroyAndReopen(options);
+  ASSERT_OK(Put("foo1", "bar1"));
+  ASSERT_OK(Put("foo2", "bar2"));
+  ASSERT_OK(Put("foo4", "bar4"));
+  ASSERT_OK(Flush());
+
+  Slice ub("foo3");
+  ReadOptions ro;
+  ro.iterate_upper_bound = &ub;
+
+  std::unique_ptr<Iterator> iter(db_->NewIterator(ro));
+
+  iter->Seek("foo");
+  ASSERT_TRUE(iter->Valid());
+  ASSERT_EQ(iter->key().compare(Slice("foo1")), 0);
+  ASSERT_EQ(upper_bound_hits, 0);
+
+  iter->Next();
+  ASSERT_TRUE(iter->Valid());
+  ASSERT_EQ(iter->key().compare(Slice("foo2")), 0);
+  ASSERT_EQ(upper_bound_hits, 0);
+
+  iter->Next();
+  ASSERT_FALSE(iter->Valid());
+  ASSERT_EQ(upper_bound_hits, 1);
+}
 // TODO(3.13): fix the issue of Seek() + Prev() which might not necessary
 //             return the biggest key which is smaller than the seek key.
 TEST_F(DBIteratorTest, PrevAfterAndNextAfterMerge) {
   Options options;
   options.create_if_missing = true;
   options.merge_operator = MergeOperators::CreatePutOperator();
+  options.env = env_;
   DestroyAndReopen(options);
 
   // write three entries with different keys using Merge()
@@ -1813,7 +1886,7 @@ TEST_F(DBIteratorTest, DBIteratorSkipRecentDuplicatesTest) {
 #endif
 
   // Seek iterator to a smaller key.
-  perf_context.Reset();
+  get_perf_context()->Reset();
   iter->Seek("a");
   ASSERT_TRUE(iter->Valid());
   EXPECT_EQ("b", iter->key().ToString());
@@ -1821,17 +1894,17 @@ TEST_F(DBIteratorTest, DBIteratorSkipRecentDuplicatesTest) {
 
   // Check that the seek didn't do too much work.
   // Checks are not tight, just make sure that everything is well below 100.
-  EXPECT_LT(perf_context.internal_key_skipped_count, 4);
-  EXPECT_LT(perf_context.internal_recent_skipped_count, 8);
-  EXPECT_LT(perf_context.seek_on_memtable_count, 10);
-  EXPECT_LT(perf_context.next_on_memtable_count, 10);
-  EXPECT_LT(perf_context.prev_on_memtable_count, 10);
+  EXPECT_LT(get_perf_context()->internal_key_skipped_count, 4);
+  EXPECT_LT(get_perf_context()->internal_recent_skipped_count, 8);
+  EXPECT_LT(get_perf_context()->seek_on_memtable_count, 10);
+  EXPECT_LT(get_perf_context()->next_on_memtable_count, 10);
+  EXPECT_LT(get_perf_context()->prev_on_memtable_count, 10);
 
   // Check that iterator did something like what we expect.
-  EXPECT_EQ(perf_context.internal_delete_skipped_count, 0);
-  EXPECT_EQ(perf_context.internal_merge_count, 0);
-  EXPECT_GE(perf_context.internal_recent_skipped_count, 2);
-  EXPECT_GE(perf_context.seek_on_memtable_count, 2);
+  EXPECT_EQ(get_perf_context()->internal_delete_skipped_count, 0);
+  EXPECT_EQ(get_perf_context()->internal_merge_count, 0);
+  EXPECT_GE(get_perf_context()->internal_recent_skipped_count, 2);
+  EXPECT_GE(get_perf_context()->seek_on_memtable_count, 2);
   EXPECT_EQ(1, options.statistics->getTickerCount(
                  NUMBER_OF_RESEEKS_IN_ITERATION));
 }

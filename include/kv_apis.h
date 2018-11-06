@@ -137,9 +137,9 @@ uint64_t kv_get_num_sectors(uint64_t handle);
 /**
  * @brief Returns the result of get log page Admin Command
  * @param handle device handle
- * @param log ID
+ * @param log_id ID
  * @param buffer to store log data(OUT)
- * @param buffer size
+ * @param buffer_size
  * @return KV_SUCCESS
  * @return KV_ERR_SDK_INVALID_PARAM
  * @return KV_ERR_IO
@@ -309,6 +309,7 @@ int kv_iterate_info(uint64_t handle, kv_iterate_handle_info* info, int nr_handle
 
 /**
  * @brief Appends value to existing value by given key(deprecated)
+ * @param handle Handle to the KV NVMe Device
  * @param kv kv_pair structure
  * @return (deprecated. 2018.05.31) will return KV_ERR_DD_UNSUPPORTED_CMD
  * @return KV_SUCCESS
@@ -329,6 +330,7 @@ int kv_append(uint64_t handle, kv_pair *kv);
 
 /**
  * @brief Checks if given key exist and returns status(status code=0 : exist, 0x10=not exist)
+ * @param handle Handle to the KV NVMe Device
  * @param kv kv_pair structure
  * @return KV_SUCCESS
  * @return KV_ERR_NOT_EXIST_KEY
@@ -339,6 +341,7 @@ int kv_exist(uint64_t handle, kv_pair* kv);
 
 /**
  * @brief Checks if given key exist and returns status in async manner (status code=0 : exist, 0x10=not exist)
+ * @param handle Handle to the KV NVMe Device
  * @param kv kv_pair structure
  * @return KV_SUCCESS
  * @return KV_ERR_NOT_EXIST_KEY
@@ -404,7 +407,7 @@ int kv_get_cpus_on_device(uint64_t handle, int* nr_core, int* arr_core);
 int kv_is_sdk_initialized(void);
 
 /**
- * @breif Returns a KV SSD device id for the given handle
+ * @brief Returns a KV SSD device id for the given handle
  * @param handle device handle
  * @return device id
  */

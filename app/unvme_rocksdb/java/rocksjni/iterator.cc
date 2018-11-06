@@ -1,7 +1,7 @@
 // Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-// This source code is licensed under the BSD-style license found in the
-// LICENSE file in the root directory of this source tree. An additional grant
-// of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 //
 // This file implements the "bridge" between Java and C++ and enables
 // calling c++ rocksdb::Iterator methods from Java side.
@@ -132,7 +132,7 @@ jbyteArray Java_org_rocksdb_RocksIterator_key0(
     return nullptr;
   }
   env->SetByteArrayRegion(jkey, 0, static_cast<jsize>(key_slice.size()),
-                          reinterpret_cast<const jbyte*>(key_slice.data()));
+                          const_cast<jbyte*>(reinterpret_cast<const jbyte*>(key_slice.data())));
   return jkey;
 }
 
@@ -153,6 +153,6 @@ jbyteArray Java_org_rocksdb_RocksIterator_value0(
     return nullptr;
   }
   env->SetByteArrayRegion(jkeyValue, 0, static_cast<jsize>(value_slice.size()),
-                          reinterpret_cast<const jbyte*>(value_slice.data()));
+                          const_cast<jbyte*>(reinterpret_cast<const jbyte*>(value_slice.data())));
   return jkeyValue;
 }

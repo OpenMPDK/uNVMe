@@ -1,7 +1,7 @@
 //  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-//  This source code is licensed under the BSD-style license found in the
-//  LICENSE file in the root directory of this source tree. An additional grant
-//  of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 #include "table/meta_blocks.h"
 
 #include <map>
@@ -114,7 +114,7 @@ void LogPropertiesCollectionError(
   std::string msg =
     "Encountered error when calling TablePropertiesCollector::" +
     method + "() with collector name: " + name;
-  Log(InfoLogLevel::ERROR_LEVEL, info_log, "%s", msg.c_str());
+  ROCKS_LOG_ERROR(info_log, "%s", msg.c_str());
 }
 
 bool NotifyCollectTableCollectorsOnAdd(
@@ -227,8 +227,7 @@ Status ReadProperties(const Slice& handle_value, RandomAccessFileReader* file,
         auto error_msg =
           "Detect malformed value in properties meta-block:"
           "\tkey: " + key + "\tval: " + raw_val.ToString();
-        Log(InfoLogLevel::ERROR_LEVEL, ioptions.info_log, "%s",
-        error_msg.c_str());
+        ROCKS_LOG_ERROR(ioptions.info_log, "%s", error_msg.c_str());
         continue;
       }
       *(pos->second) = val;

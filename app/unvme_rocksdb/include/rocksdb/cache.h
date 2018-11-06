@@ -1,7 +1,7 @@
 // Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-// This source code is licensed under the BSD-style license found in the
-// LICENSE file in the root directory of this source tree. An additional grant
-// of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 //
 // Copyright (c) 2011 The LevelDB Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -110,10 +110,19 @@ class Cache {
   // REQUIRES: handle must have been returned by a method on *this.
   virtual bool Ref(Handle* handle) = 0;
 
-  // Release a mapping returned by a previous Lookup().
+  /**
+   * Release a mapping returned by a previous Lookup(). A released entry might
+   * still  remain in cache in case it is later looked up by others. If
+   * force_erase is set then it also erase it from the cache if there is no
+   * other reference to  it. Erasing it should call the deleter function that
+   * was provided when the
+   * entry was inserted.
+   *
+   * Returns true if the entry was also erased.
+   */
   // REQUIRES: handle must not have been released yet.
   // REQUIRES: handle must have been returned by a method on *this.
-  virtual void Release(Handle* handle) = 0;
+  virtual bool Release(Handle* handle, bool force_erase = false) = 0;
 
   // Return the value encapsulated in a handle returned by a
   // successful Lookup().
@@ -173,10 +182,14 @@ class Cache {
                                       bool thread_safe) = 0;
 
   // Remove all entries.
-  // Prerequisit: no entry is referenced.
+  // Prerequisite: no entry is referenced.
   virtual void EraseUnRefEntries() = 0;
 
   virtual std::string GetPrintableOptions() const { return ""; }
+
+  // Mark the last inserted object as being a raw data block. This will be used
+  // in tests. The default implementation does nothing.
+  virtual void TEST_mark_as_data_block(const Slice& key, size_t charge) {}
 
  private:
   // No copying allowed

@@ -1,6 +1,6 @@
-//  This source code is licensed under the BSD-style license found in the
-//  LICENSE file in the root directory of this source tree. An additional grant
-//  of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 //
 // Copyright (c) 2011 The LevelDB Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -31,20 +31,20 @@ const std::map<LevelStatType, LevelStat> InternalStats::compaction_level_stats =
         {LevelStatType::NUM_FILES, LevelStat{"NumFiles", "Files"}},
         {LevelStatType::COMPACTED_FILES,
          LevelStat{"CompactedFiles", "CompactedFiles"}},
-        {LevelStatType::SIZE_MB, LevelStat{"SizeMB", "Size(MB}"}},
+        {LevelStatType::SIZE_BYTES, LevelStat{"SizeBytes", "Size"}},
         {LevelStatType::SCORE, LevelStat{"Score", "Score"}},
-        {LevelStatType::READ_GB, LevelStat{"ReadGB", "Read(GB}"}},
-        {LevelStatType::RN_GB, LevelStat{"RnGB", "Rn(GB}"}},
-        {LevelStatType::RNP1_GB, LevelStat{"Rnp1GB", "Rnp1(GB}"}},
-        {LevelStatType::WRITE_GB, LevelStat{"WriteGB", "Write(GB}"}},
-        {LevelStatType::W_NEW_GB, LevelStat{"WnewGB", "Wnew(GB}"}},
-        {LevelStatType::MOVED_GB, LevelStat{"MovedGB", "Moved(GB}"}},
+        {LevelStatType::READ_GB, LevelStat{"ReadGB", "Read(GB)"}},
+        {LevelStatType::RN_GB, LevelStat{"RnGB", "Rn(GB)"}},
+        {LevelStatType::RNP1_GB, LevelStat{"Rnp1GB", "Rnp1(GB)"}},
+        {LevelStatType::WRITE_GB, LevelStat{"WriteGB", "Write(GB)"}},
+        {LevelStatType::W_NEW_GB, LevelStat{"WnewGB", "Wnew(GB)"}},
+        {LevelStatType::MOVED_GB, LevelStat{"MovedGB", "Moved(GB)"}},
         {LevelStatType::WRITE_AMP, LevelStat{"WriteAmp", "W-Amp"}},
-        {LevelStatType::READ_MBPS, LevelStat{"ReadMBps", "Rd(MB/s}"}},
-        {LevelStatType::WRITE_MBPS, LevelStat{"WriteMBps", "Wr(MB/s}"}},
-        {LevelStatType::COMP_SEC, LevelStat{"CompSec", "Comp(sec}"}},
-        {LevelStatType::COMP_COUNT, LevelStat{"CompCount", "Comp(cnt}"}},
-        {LevelStatType::AVG_SEC, LevelStat{"AvgSec", "Avg(sec}"}},
+        {LevelStatType::READ_MBPS, LevelStat{"ReadMBps", "Rd(MB/s)"}},
+        {LevelStatType::WRITE_MBPS, LevelStat{"WriteMBps", "Wr(MB/s)"}},
+        {LevelStatType::COMP_SEC, LevelStat{"CompSec", "Comp(sec)"}},
+        {LevelStatType::COMP_COUNT, LevelStat{"CompCount", "Comp(cnt)"}},
+        {LevelStatType::AVG_SEC, LevelStat{"AvgSec", "Avg(sec)"}},
         {LevelStatType::KEY_IN, LevelStat{"KeyIn", "KeyIn"}},
         {LevelStatType::KEY_DROP, LevelStat{"KeyDrop", "KeyDrop"}},
 };
@@ -62,9 +62,9 @@ void PrintLevelStatsHeader(char* buf, size_t len, const std::string& cf_name) {
   };
   int line_size = snprintf(
       buf + written_size, len - written_size,
-      "Level    %s   %s %s %s  %s %s %s %s %s %s %s %s %s %s %s %s %s\n",
+      "Level    %s   %s     %s %s  %s %s %s %s %s %s %s %s %s %s %s %s %s\n",
       // Note that we skip COMPACTED_FILES and merge it with Files column
-      hdr(LevelStatType::NUM_FILES), hdr(LevelStatType::SIZE_MB),
+      hdr(LevelStatType::NUM_FILES), hdr(LevelStatType::SIZE_BYTES),
       hdr(LevelStatType::SCORE), hdr(LevelStatType::READ_GB),
       hdr(LevelStatType::RN_GB), hdr(LevelStatType::RNP1_GB),
       hdr(LevelStatType::WRITE_GB), hdr(LevelStatType::W_NEW_GB),
@@ -91,7 +91,7 @@ void PrepareLevelStats(std::map<LevelStatType, double>* level_stats,
 
   (*level_stats)[LevelStatType::NUM_FILES] = num_files;
   (*level_stats)[LevelStatType::COMPACTED_FILES] = being_compacted;
-  (*level_stats)[LevelStatType::SIZE_MB] = total_file_size / kMB;
+  (*level_stats)[LevelStatType::SIZE_BYTES] = total_file_size;
   (*level_stats)[LevelStatType::SCORE] = score;
   (*level_stats)[LevelStatType::READ_GB] = bytes_read / kGB;
   (*level_stats)[LevelStatType::RN_GB] =
@@ -117,25 +117,30 @@ void PrepareLevelStats(std::map<LevelStatType, double>* level_stats,
 void PrintLevelStats(char* buf, size_t len, const std::string& name,
                      const std::map<LevelStatType, double>& stat_value) {
   snprintf(buf, len,
-           "%4s %6d/%-3d %8.2f %5.1f " /*  Level, Files, Size(MB), Score */
-           "%8.1f "                    /*  Read(GB) */
-           "%7.1f "                    /*  Rn(GB) */
-           "%8.1f "                    /*  Rnp1(GB) */
-           "%9.1f "                    /*  Write(GB) */
-           "%8.1f "                    /*  Wnew(GB) */
-           "%9.1f "                    /*  Moved(GB) */
-           "%5.1f "                    /*  W-Amp */
-           "%8.1f "                    /*  Rd(MB/s) */
-           "%8.1f "                    /*  Wr(MB/s) */
-           "%9.0f "                    /*  Comp(sec) */
-           "%9d "                      /*  Comp(cnt) */
-           "%8.3f "                    /*  Avg(sec) */
-           "%7s "                      /*  KeyIn */
-           "%6s\n",                    /*  KeyDrop */
+           "%4s "      /*  Level */
+           "%6d/%-3d " /*  Files */
+           "%8s "      /*  Size */
+           "%5.1f "    /*  Score */
+           "%8.1f "    /*  Read(GB) */
+           "%7.1f "    /*  Rn(GB) */
+           "%8.1f "    /*  Rnp1(GB) */
+           "%9.1f "    /*  Write(GB) */
+           "%8.1f "    /*  Wnew(GB) */
+           "%9.1f "    /*  Moved(GB) */
+           "%5.1f "    /*  W-Amp */
+           "%8.1f "    /*  Rd(MB/s) */
+           "%8.1f "    /*  Wr(MB/s) */
+           "%9.0f "    /*  Comp(sec) */
+           "%9d "      /*  Comp(cnt) */
+           "%8.3f "    /*  Avg(sec) */
+           "%7s "      /*  KeyIn */
+           "%6s\n",    /*  KeyDrop */
            name.c_str(),
            static_cast<int>(stat_value.at(LevelStatType::NUM_FILES)),
            static_cast<int>(stat_value.at(LevelStatType::COMPACTED_FILES)),
-           stat_value.at(LevelStatType::SIZE_MB),
+           BytesToHumanString(
+               static_cast<uint64_t>(stat_value.at(LevelStatType::SIZE_BYTES)))
+               .c_str(),
            stat_value.at(LevelStatType::SCORE),
            stat_value.at(LevelStatType::READ_GB),
            stat_value.at(LevelStatType::RN_GB),
@@ -190,6 +195,9 @@ static const std::string compression_ratio_at_level_prefix =
 static const std::string allstats = "stats";
 static const std::string sstables = "sstables";
 static const std::string cfstats = "cfstats";
+static const std::string cfstats_no_file_histogram =
+    "cfstats-no-file-histogram";
+static const std::string cf_file_histogram = "cf-file-histogram";
 static const std::string dbstats = "dbstats";
 static const std::string levelstats = "levelstats";
 static const std::string num_immutable_mem_table = "num-immutable-mem-table";
@@ -243,6 +251,10 @@ const std::string DB::Properties::kCompressionRatioAtLevelPrefix =
 const std::string DB::Properties::kStats = rocksdb_prefix + allstats;
 const std::string DB::Properties::kSSTables = rocksdb_prefix + sstables;
 const std::string DB::Properties::kCFStats = rocksdb_prefix + cfstats;
+const std::string DB::Properties::kCFStatsNoFileHistogram =
+    rocksdb_prefix + cfstats_no_file_histogram;
+const std::string DB::Properties::kCFFileHistogram =
+    rocksdb_prefix + cf_file_histogram;
 const std::string DB::Properties::kDBStats = rocksdb_prefix + dbstats;
 const std::string DB::Properties::kLevelStats = rocksdb_prefix + levelstats;
 const std::string DB::Properties::kNumImmutableMemTable =
@@ -319,6 +331,11 @@ const std::unordered_map<std::string, DBPropertyInfo>
         {DB::Properties::kCFStats,
          {false, &InternalStats::HandleCFStats, nullptr,
           &InternalStats::HandleCFMapStats}},
+        {DB::Properties::kCFStatsNoFileHistogram,
+         {false, &InternalStats::HandleCFStatsNoFileHistogram, nullptr,
+          nullptr}},
+        {DB::Properties::kCFFileHistogram,
+         {false, &InternalStats::HandleCFFileHistogram, nullptr, nullptr}},
         {DB::Properties::kDBStats,
          {false, &InternalStats::HandleDBStats, nullptr, nullptr}},
         {DB::Properties::kSSTables,
@@ -507,6 +524,17 @@ bool InternalStats::HandleCFStats(std::string* value, Slice suffix) {
   return true;
 }
 
+bool InternalStats::HandleCFStatsNoFileHistogram(std::string* value,
+                                                 Slice suffix) {
+  DumpCFStatsNoFileHistogram(value);
+  return true;
+}
+
+bool InternalStats::HandleCFFileHistogram(std::string* value, Slice suffix) {
+  DumpCFFileHistogram(value);
+  return true;
+}
+
 bool InternalStats::HandleDBStats(std::string* value, Slice suffix) {
   DumpDBStats(value);
   return true;
@@ -649,12 +677,14 @@ bool InternalStats::HandleEstimateNumKeys(uint64_t* value, DBImpl* db,
   // Estimate number of entries in the column family:
   // Use estimated entries in tables + total entries in memtables.
   const auto* vstorage = cfd_->current()->storage_info();
-  *value = cfd_->mem()->num_entries() +
-           cfd_->imm()->current()->GetTotalNumEntries() -
-           (cfd_->mem()->num_deletes() +
-            cfd_->imm()->current()->GetTotalNumDeletes()) *
-               2 +
-           vstorage->GetEstimatedActiveKeys();
+  uint64_t estimate_keys = cfd_->mem()->num_entries() +
+                           cfd_->imm()->current()->GetTotalNumEntries() +
+                           vstorage->GetEstimatedActiveKeys();
+  uint64_t estimate_deletes =
+      cfd_->mem()->num_deletes() + cfd_->imm()->current()->GetTotalNumDeletes();
+  *value = estimate_keys > estimate_deletes * 2
+               ? estimate_keys - (estimate_deletes * 2)
+               : 0;
   return true;
 }
 
@@ -850,16 +880,6 @@ void InternalStats::DumpDBStats(std::string* value) {
                10000.0 / std::max(interval_seconds_up, 0.001));
   value->append(buf);
 
-  for (int level = 0; level < number_levels_; level++) {
-    if (!file_read_latency_[level].Empty()) {
-      char buf2[5000];
-      snprintf(buf2, sizeof(buf2),
-               "** Level %d read latency histogram (micros):\n%s\n", level,
-               file_read_latency_[level].ToString().c_str());
-      value->append(buf2);
-    }
-  }
-
   db_stats_snapshot_.seconds_up = seconds_up;
   db_stats_snapshot_.ingest_bytes = user_bytes_written;
   db_stats_snapshot_.write_other = write_other;
@@ -924,6 +944,9 @@ void InternalStats::DumpCFMapStats(
   int total_files = 0;
   int total_files_being_compacted = 0;
   double total_file_size = 0;
+  uint64_t flush_ingest = cf_stats_value_[BYTES_FLUSHED];
+  uint64_t add_file_ingest = cf_stats_value_[BYTES_INGESTED_ADD_FILE];
+  uint64_t curr_ingest = flush_ingest + add_file_ingest;
   for (int level = 0; level < number_levels_; level++) {
     int files = vstorage->NumLevelFiles(level);
     total_files += files;
@@ -931,11 +954,17 @@ void InternalStats::DumpCFMapStats(
     if (comp_stats_[level].micros > 0 || files > 0) {
       compaction_stats_sum->Add(comp_stats_[level]);
       total_file_size += vstorage->NumLevelBytes(level);
+      uint64_t input_bytes;
+      if (level == 0) {
+        input_bytes = curr_ingest;
+      } else {
+        input_bytes = comp_stats_[level].bytes_read_non_output_levels;
+      }
       double w_amp =
-          (comp_stats_[level].bytes_read_non_output_levels == 0)
+          (input_bytes == 0)
               ? 0.0
               : static_cast<double>(comp_stats_[level].bytes_written) /
-                    comp_stats_[level].bytes_read_non_output_levels;
+                    input_bytes;
       std::map<LevelStatType, double> level_stats;
       PrepareLevelStats(&level_stats, files, files_being_compacted[level],
                         static_cast<double>(vstorage->NumLevelBytes(level)),
@@ -943,9 +972,6 @@ void InternalStats::DumpCFMapStats(
       (*levels_stats)[level] = level_stats;
     }
   }
-  uint64_t flush_ingest = cf_stats_value_[BYTES_FLUSHED];
-  uint64_t add_file_ingest = cf_stats_value_[BYTES_INGESTED_ADD_FILE];
-  uint64_t curr_ingest = flush_ingest + add_file_ingest;
   // Cumulative summary
   double w_amp = compaction_stats_sum->bytes_written /
                  static_cast<double>(curr_ingest + 1);
@@ -957,6 +983,11 @@ void InternalStats::DumpCFMapStats(
 }
 
 void InternalStats::DumpCFStats(std::string* value) {
+  DumpCFStatsNoFileHistogram(value);
+  DumpCFFileHistogram(value);
+}
+
+void InternalStats::DumpCFStatsNoFileHistogram(std::string* value) {
   char buf[2000];
   // Per-ColumnFamily stats
   PrintLevelStatsHeader(buf, sizeof(buf), cfd_->GetName());
@@ -972,6 +1003,7 @@ void InternalStats::DumpCFStats(std::string* value) {
       value->append(buf);
     }
   }
+
   // Print sum of level stats
   PrintLevelStats(buf, sizeof(buf), "Sum", levels_stats[-1]);
   value->append(buf);
@@ -1105,6 +1137,7 @@ void InternalStats::DumpCFStats(std::string* value) {
            total_stall_count - cf_stats_snapshot_.stall_count);
   value->append(buf);
 
+  cf_stats_snapshot_.seconds_up = seconds_up;
   cf_stats_snapshot_.ingest_bytes_flush = flush_ingest;
   cf_stats_snapshot_.ingest_bytes_addfile = add_file_ingest;
   cf_stats_snapshot_.ingest_files_addfile = ingest_files_addfile;
@@ -1114,6 +1147,23 @@ void InternalStats::DumpCFStats(std::string* value) {
   cf_stats_snapshot_.stall_count = total_stall_count;
 }
 
+void InternalStats::DumpCFFileHistogram(std::string* value) {
+  char buf[2000];
+  snprintf(buf, sizeof(buf),
+           "\n** File Read Latency Histogram By Level [%s] **\n",
+           cfd_->GetName().c_str());
+  value->append(buf);
+
+  for (int level = 0; level < number_levels_; level++) {
+    if (!file_read_latency_[level].Empty()) {
+      char buf2[5000];
+      snprintf(buf2, sizeof(buf2),
+               "** Level %d read latency histogram (micros):\n%s\n", level,
+               file_read_latency_[level].ToString().c_str());
+      value->append(buf2);
+    }
+  }
+}
 
 #else
 

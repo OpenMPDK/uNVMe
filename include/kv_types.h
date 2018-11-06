@@ -54,12 +54,13 @@
 
 //Constants
 #define KV_ALIGNMENT_UNIT 64
-#define KV_MIN_VALUE_LEN 64
-#define KV_MAX_STORE_VALUE_LEN (28*1024) //28KB
-#define KV_MAX_VALUE_LEN (2024*1024) //2MB
+#define KV_MIN_VALUE_LEN 0
+#define KV_MAX_IO_VALUE_LEN (2048*1024) //28KB -> 2048KB
+#define LBA_MAX_IO_VALUE_LEN (2048*1024) //2024KB -> 2048KB
 #define KV_MAX_TOTAL_VALUE_LEN (2ull*1024*1024*1024) //2GB
-#define KV_MIN_KEY_LEN 16
+#define KV_MIN_KEY_LEN 4
 #define KV_MAX_KEY_LEN 255
+#define KV_IT_READ_BUFFER_META_LEN 4
 
 #define KV_SDK_MAX_ITERATE_READ_LEN (32*1024) //32KB
 #define KV_SDK_MIN_ITERATE_READ_LEN (32*1024) //32KB
@@ -133,7 +134,7 @@ enum kv_retrieve_option {
  * @brief options used for delete operation
  */
 enum kv_delete_option {		
-	KV_DELETE_DEFAULT = 0x00,		/**<  [DEFAULT] default operaton for command */
+	KV_DELETE_DEFAULT = 0x00,		/**<  [DEFAULT] default operation for command */
 	KV_DELETE_CHECK_IDEMPOTENT = 0x01,	/**<  check whether the key being deleted exists in KV SSD */
 };		
 		
@@ -141,7 +142,7 @@ enum kv_delete_option {
  * @brief options used for exist operation
  */
 enum kv_exist_option {		
-	KV_EXIST_DEFAULT = 0x00,		/**<  [DEFAULT] default operaton for command */ 
+	KV_EXIST_DEFAULT = 0x00,		/**<  [DEFAULT] default operation for command */
 };		
 
 /**
@@ -149,7 +150,7 @@ enum kv_exist_option {
  */
 enum kv_format_option {
 	KV_FORMAT_MAPDATA = 0x00,
-	KV_FORMAT_USERDATA = 0x01,		/**<  [DEFAULT] default operaton for format */
+	KV_FORMAT_USERDATA = 0x01,		/**<  [DEFAULT] default operation for format */
 };
 		
 /**
@@ -198,7 +199,8 @@ enum kv_result {
         KV_ERR_INVALID_VALUE_OFFSET = 0x02,                     /**<  invalid value offset */
         KV_ERR_INVALID_KEY_SIZE = 0x03,                         /**<  invalid key length(size) */
         KV_ERR_INVALID_OPTION = 0x04,                           /**<  invalid I/O option */
-        //0x05 ~ 0x07 are reserved
+        KV_ERR_INVALID_KEYSPACE_ID = 0x05,                      /**<  invalid keyspace ID (should be 0 or 1. 2018-08027) */
+        //0x06 ~ 0x07 are reserved
         KV_ERR_MISALIGNED_VALUE_SIZE = 0x08,                    /**<  misaligned value length(size) */
         KV_ERR_MISALIGNED_VALUE_OFFSET = 0x09,                  /**<  misaligned value offset */
         KV_ERR_MISALIGNED_KEY_SIZE = 0x0A,                      /**<  misaligned key length(size) */
@@ -215,6 +217,8 @@ enum kv_result {
 	KV_ERR_ITERATE_HANDLE_ALREADY_OPENED = 0x92,  	        /**<  fail to open iterator with given prefix/bitmask as it is already opened */
 	KV_ERR_ITERATE_READ_EOF = 0x93,     			/**<  end-of-file for iterate_read with given iterator */
 	KV_ERR_ITERATE_REQUEST_FAIL = 0x94,     		/**<  fail to process the iterate request due to FW internal status */ 
+	KV_ERR_ITERATE_TCG_LOCKED = 0x95,     			/**<  iterate TCG locked */
+	KV_ERR_ITERATE_ERROR = 0x96,     			/**<  an error while iterate, closing the iterate handle is recommended */
 
         //0x100 ~ 0x1FF for DD Error
 	KV_ERR_DD_NO_DEVICE = 0x100,
@@ -236,7 +240,7 @@ enum kv_result {
         //0x300 ~ 0x3FF for uncertain error types
         KV_WRN_MORE = 0x300,                                    /**<  more results are available(for iterate) */
         KV_ERR_BUFFER = 0x301,                                  /**<  not enough buffer(for retrieve, exist, iterate) */
-        KV_ERR_DECOMPRESSION = 0x302,                           /**<  retrieveing uncompressed value with KV_RETRIEVE_DECOMPRESSION option */
+        KV_ERR_DECOMPRESSION = 0x302,                           /**<  retrieving uncompressed value with KV_RETRIEVE_DECOMPRESSION option */
 	KV_ERR_IO = 0x303,					/**<  SDK operation error (remained type for compatibility) */
 };		
 #define KV_ERR_INVALID_VALUE (UINT64_MAX)			/**<  error in total size / waf / used size */
@@ -301,7 +305,8 @@ typedef struct {
  */
 typedef struct {
 	void *value;			/**< buffer address for value */
-	uint32_t length;		/**< value buffer size in byte unit */
+	uint32_t length;		/**< value buffer size in byte unit for input and the retuned value length for output*/
+	uint32_t actual_value_size;		/* full value size that is stored in disk (only applied on KV SSD, not on LBA SSD) */
 	uint32_t offset; 		/**< offset for value */
 } kv_value;
 

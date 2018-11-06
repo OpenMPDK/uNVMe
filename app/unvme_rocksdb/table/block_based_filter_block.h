@@ -1,7 +1,7 @@
 //  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-//  This source code is licensed under the BSD-style license found in the
-//  LICENSE file in the root directory of this source tree. An additional grant
-//  of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 //
 // Copyright (c) 2012 The LevelDB Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -81,10 +81,14 @@ class BlockBasedFilterBlockReader : public FilterBlockReader {
                               bool whole_key_filtering,
                               BlockContents&& contents, Statistics* statistics);
   virtual bool IsBlockBased() override { return true; }
-  virtual bool KeyMayMatch(const Slice& key,
-                           uint64_t block_offset = kNotValid) override;
-  virtual bool PrefixMayMatch(const Slice& prefix,
-                              uint64_t block_offset = kNotValid) override;
+  virtual bool KeyMayMatch(
+      const Slice& key, uint64_t block_offset = kNotValid,
+      const bool no_io = false,
+      const Slice* const const_ikey_ptr = nullptr) override;
+  virtual bool PrefixMayMatch(
+      const Slice& prefix, uint64_t block_offset = kNotValid,
+      const bool no_io = false,
+      const Slice* const const_ikey_ptr = nullptr) override;
   virtual size_t ApproximateMemoryUsage() const override;
 
   // convert this object to a human readable form

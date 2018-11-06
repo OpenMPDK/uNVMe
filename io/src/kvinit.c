@@ -56,7 +56,8 @@
 #define NUM_PARAMS (256)
 #define KV_ERR_SDK_OPTION_LOAD (-1)
 
-kv_sdk g_sdk;
+kv_sdk g_sdk = {0,};
+
 int g_kvsdk_ref_count = 0;
 static pthread_mutex_t g_init_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -175,6 +176,8 @@ int kv_sdk_load_option(kv_sdk* sdk_opt, char* log_path){ //json parser using SPD
         size_t read;
 
 	struct spdk_json_val values[NUM_PARAMS];
+
+	memset(sdk_opt, 0, sizeof(kv_sdk));
 
 	if (log_path == NULL)
 		return KV_ERR_SDK_OPTION_LOAD;
@@ -490,7 +493,7 @@ int _kv_sdk_init(int init_from, void *option, struct spdk_env_opts *spdk_opts){
 
 	total_mem_size_MB = kv_sdk_total_mem_needed(); //hugemem size for slab, dd init, and user app
 	if (spdk_opts != NULL) {
-		spdk_opts->dpdk_mem_size = total_mem_size_MB;
+		spdk_opts->mem_size = total_mem_size_MB;
 		kv_env_init_with_spdk_opts(spdk_opts);
 	} else { //spdk_opts == NULL
 		kv_env_init(total_mem_size_MB);

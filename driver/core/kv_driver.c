@@ -173,6 +173,27 @@ static void kv_nvme_remove_hugepage_info(void){
         remove(info_path);
 }
 
+static void kv_nvme_remove_socket(void){
+	const char *directory = "/var/run";
+	const char *xdg_runtime_dir = getenv("XDG_RUNTIME_DIR");
+	const char *fallback = "/tmp";
+	char spdk_prefix[32] = {0};
+	char cmd[512] = {0};
+
+	sprintf(spdk_prefix, "spdk%d", getpid());
+
+	if (getuid() != 0) {
+                if (xdg_runtime_dir != NULL) {
+                        directory = xdg_runtime_dir;
+		} else {
+			directory = fallback;
+		}
+	}
+	sprintf(cmd, "rm -rf %s/dpdk/%s", directory, spdk_prefix);
+	int ret = system(cmd);
+	KVNVME_INFO("remove socket info: %d\n", ret);
+}
+
 void _kv_env_init(uint32_t process_mem_size_mb, struct spdk_env_opts* opts){
         int ret = KV_ERR_DD_INVALID_PARAM;
 
@@ -186,16 +207,16 @@ void _kv_env_init(uint32_t process_mem_size_mb, struct spdk_env_opts* opts){
 
 	if(opts){
 		spdk_env_init(opts);
-		KVNVME_INFO("mem_size_mb: %u shm_id: %u\n",opts->dpdk_mem_size, opts->shm_id);
+		KVNVME_INFO("mem_size_mb: %u shm_id: %u\n",opts->mem_size, opts->shm_id);
 	}
 	else{
 		struct spdk_env_opts local_opts;
 		spdk_env_opts_init(&local_opts);
 		local_opts.name = "KV_Interface";
-		local_opts.dpdk_mem_size = process_mem_size_mb;
+		local_opts.mem_size = process_mem_size_mb;
 		local_opts.shm_id = getpid();
 		spdk_env_init(&local_opts);
-		KVNVME_INFO("mem_size_mb: %u shm_id: %u\n",local_opts.dpdk_mem_size, local_opts.shm_id);
+		KVNVME_INFO("mem_size_mb: %u shm_id: %u\n",local_opts.mem_size, local_opts.shm_id);
 	}
 
         KVNVME_INFO("Initialized the KV API Environment");
@@ -228,7 +249,7 @@ void kv_env_init(uint32_t process_mem_size_mb){
 }
 
 void kv_env_init_with_spdk_opts(struct spdk_env_opts* opts){
-	_kv_env_init(opts->dpdk_mem_size,opts);
+	_kv_env_init(opts->mem_size,opts);
 }
 
 int kv_nvme_io_queue_type(uint64_t handle, int core_id) {
@@ -424,7 +445,8 @@ int kv_nvme_init(const char *bdf, kv_nvme_io_options *options, unsigned int ssd_
         for(queue_id = 0; queue_id < MAX_CPU_CORES; queue_id++) {
 
                 if(cpu_core_mask & (1ULL << queue_id)) {
-                        nvme->qpairs[queue_id] = spdk_nvme_ctrlr_alloc_io_qpair(nvme->ctrlr, 0);
+			//No Queue option
+                        nvme->qpairs[queue_id] = spdk_nvme_ctrlr_alloc_io_qpair(nvme->ctrlr, NULL, 0);
                 } else {
                         nvme->qpairs[queue_id] = NULL;
                 }
@@ -581,7 +603,7 @@ int kv_nvme_init(const char *bdf, kv_nvme_io_options *options, unsigned int ssd_
                         last_cpu_id = CQ_THREAD_DEFAULT_CPU;
                 }
 
-                nvme->stop_process_all_cqs = 1;
+                nvme->stop_process_all_cqs = 0;
 
                 cq_thread_args->nvme = nvme;
                 cq_thread_args->cpu_id = last_cpu_id;
@@ -692,7 +714,7 @@ int kv_nvme_init(const char *bdf, kv_nvme_io_options *options, unsigned int ssd_
                 unsigned int async_qpair_start_index = 0;
 
                 for(thread_id = 0; thread_id < num_cq_threads; thread_id++) {
-                        nvme->stop_process_cq[thread_id] = 1;
+                        nvme->stop_process_cq[thread_id] = 0;
 
                         cq_thread_args[thread_id] = calloc(1, sizeof(process_cq_thread_arg_t));
 
@@ -859,13 +881,11 @@ int kv_nvme_finalize(char *bdf) {
                 }
         }
 
-        sleep(1); // Allow the CQ processing thread(s) to stop gracefully
-
         if(nvme->num_cq_threads == 1) {
-                pthread_detach(nvme->process_all_cqs_thread);
+                pthread_join(nvme->process_all_cqs_thread, NULL);
         } else {
                 for(thread_id = 0; thread_id < nvme->num_cq_threads; thread_id++) {
-                        pthread_detach(nvme->process_cq_thread[thread_id]);
+                        pthread_join(nvme->process_cq_thread[thread_id], NULL);
                 }
         }
 
@@ -892,6 +912,7 @@ int kv_nvme_finalize(char *bdf) {
         free(nvme);
 
         kv_nvme_remove_hugepage_info();
+        kv_nvme_remove_socket();
 
         LEAVE();
         KVNVME_DEBUG("Done\n");

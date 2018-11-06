@@ -74,7 +74,7 @@ void set_hash_func(int hash_no);
 void (*hash_func)(const void* key, int len, unsigned int seed, void* out);
 void show_key(kv_key* origin_key, kv_key* hashed_key);
 
-void show_elapsed_time(struct timeval* start, struct timeval* end, char* msg, int repeat_count, int value_size, struct latency_stat *stat);
-void show_elapsed_time_cumulative(struct timeval* start, struct timeval* end, int num_timeval, char* msg, int repeat_count_each, int value_size, struct latency_stat *stat);
+void show_elapsed_time(struct timeval* start, struct timeval* end, char* msg, int repeat_count, uint64_t value_size, struct latency_stat *stat);
+void show_elapsed_time_cumulative(struct timeval* start, struct timeval* end, int num_timeval, char* msg, int repeat_count_each, uint64_t value_size, struct latency_stat *stat);
 
 #endif

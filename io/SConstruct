@@ -4,8 +4,9 @@ import datetime
 kv_io='kvio'
 global_include='../include'
 kv_dd_path='../driver'
-spdk_path='../driver/external/spdk'
-lib_path = ['#', '#/deps/check-0.9.8/src/.libs', '/usr/lib', '/usr/local/lib', '#libs', '%s/core' %(kv_dd_path)]
+spdk_path='../driver/external/spdk-18.04.1'
+libdd_path = ['%s/core' %(kv_dd_path)]
+lib_path = [libdd_path, '#', '#/deps/check-0.9.8/src/.libs', '/usr/lib', '/usr/local/lib', '#libs']
 
 def getNow():
         now = datetime.datetime.now()
@@ -39,13 +40,13 @@ Default(static_object, radix_perf)
 
 alloc_perf = env_with_err.Program('alloc_perf',
             ['tests/alloc_perf.c'],
-            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl'],
+            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl', 'numa'],
             LIBPATH = lib_path)
 Default(static_object, alloc_perf)
 
 alloc_udd_perf = env_with_err.Program('alloc_udd_perf',
             ['tests/alloc_udd_perf.c'],
-            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl'],
+            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl', 'numa', 'uuid'],
             LIBPATH = lib_path)
 Default(static_object, alloc_udd_perf)
 
@@ -63,32 +64,32 @@ Default(static_object, cache_multi_perf)
 
 sdk_perf = env_with_err.Program('sdk_perf',
             ['tests/sdk_perf.c'],
-            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl'],
+            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl', 'numa', 'uuid'],
             LIBPATH = lib_path)
 Default(static_object, sdk_perf)
 
 test_simple_config = env_with_err.Program('test_simple_config',
             ['tests/test_simple_config.c'],
-            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl'],
+            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl', 'numa', 'uuid'],
             LIBPATH = lib_path)
 Default(static_object, test_simple_config)
 
 test_simple_config_adv = env_with_err.Program('test_simple_config_adv',
             ['tests/test_simple_config_adv.c'],
-            LIBS=[kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl'],
+            LIBS=[kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl', 'numa', 'uuid'],
             LIBPATH = lib_path)
 Default(static_object, test_simple_config_adv)
 
 
 sdk_perf_async = env_with_err.Program('sdk_perf_async',
             ['tests/sdk_perf_async.c'],
-            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl'],
+            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl', 'numa', 'uuid'],
             LIBPATH = lib_path)
 Default(static_object, sdk_perf_async)
 
 sdk_exist_append_iterate_getlog = env_with_err.Program('sdk_exist_append_iterate_getlog',
             ['tests/sdk_exist_append_iterate_getlog.c'],
-            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl'],
+            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl', 'numa', 'uuid'],
             LIBPATH = lib_path)
 Default(static_object, sdk_exist_append_iterate_getlog)
 
@@ -100,43 +101,43 @@ Default(static_object, hash_perf)
 
 kv_perf = env_with_err.Program('kv_perf',
             ['tests/kv_perf.c'],
-            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl'],
+            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl', 'numa', 'uuid'],
             LIBPATH = lib_path)
 Default(static_object, kv_perf)
 
 sdk_iterate = env_with_err.Program('sdk_iterate',
             ['tests/sdk_iterate.c'],
-            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl'],
+            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl', 'numa', 'uuid'],
             LIBPATH = lib_path)
 Default(static_object, sdk_iterate)
 
 sdk_iterate_async = env_with_err.Program('sdk_iterate_async',
             ['tests/sdk_iterate_async.c'],
-            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl'],
+            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl', 'numa', 'uuid'],
             LIBPATH = lib_path)
 Default(static_object, sdk_iterate_async)
 
 test_iterate = env_with_err.Program('test_iterate',
             ['tests/test_iterate.c'],
-            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl'],
+            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl', 'numa', 'uuid'],
             LIBPATH = lib_path)
 Default(static_object, test_iterate)
 
 test_iterate_async = env_with_err.Program('test_iterate_async',
             ['tests/test_iterate_async.c'],
-            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl'],
+            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl', 'numa', 'uuid'],
             LIBPATH = lib_path)
 Default(static_object, test_iterate_async)
 
 cumulative_iterate = env_with_err.Program('cumulative_iterate',
             ['tests/cumulative_iterate.c'],
-            LIBS=[ kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl'],
+            LIBS=[ kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl', 'numa', 'uuid'],
             LIBPATH = lib_path)
 Default(static_object, cumulative_iterate)
 
 cumulative_iterate_async = env_with_err.Program('cumulative_iterate_async',
             ['tests/cumulative_iterate_async.c'],
-            LIBS=[ kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl'],
+            LIBS=[ kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl', 'numa', 'uuid'],
             LIBPATH = lib_path)
 Default(static_object, cumulative_iterate_async)
 

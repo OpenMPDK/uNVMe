@@ -45,7 +45,7 @@
 #include "kvutil.h"
 
 int iterate() {
-	printf("%s start\n",__FUNCTION__);
+	fprintf(stderr, "%s start\n",__FUNCTION__);
 
 	int i;
 	int ret = -EINVAL;
@@ -88,18 +88,18 @@ int iterate() {
 	if(!handle)
 		return ret;
 
-	printf("handle = %ld\n",handle);
+	fprintf(stderr, "handle = %ld\n",handle);
 	gettimeofday(&end, NULL);
 	show_elapsed_time(&start, &end, "nvme_init", 0, 0, NULL);
 
 	uint64_t total_size = kv_nvme_get_total_size(handle);
 	uint64_t used_size = kv_nvme_get_used_size(handle);
-	printf("Total Size of the NVMe Device: %lld MB\n", (unsigned long long)total_size / MB);
+	fprintf(stderr, "Total Size of the NVMe Device: %lld MB\n", (unsigned long long)total_size / MB);
 	if(ssd_type == KV_TYPE_SSD){
-		printf("Used Size of the NVMe Device: %.2f %s \n", (float)used_size / 100, "%");
+		fprintf(stderr, "Used Size of the NVMe Device: %.2f %s \n", (float)used_size / 100, "%");
 	}
 	else{
-		printf("Used Size of the NVMe Device: %lld MB\n", (unsigned long long)used_size / MB);
+		fprintf(stderr, "Used Size of the NVMe Device: %lld MB\n", (unsigned long long)used_size / MB);
 	}
 
 	//retrieve log
@@ -112,18 +112,18 @@ int iterate() {
 		char* p = logbuf;
 		for(i=0;i<sizeof(logbuf);i++){
 			if(!(i%line)){
-				printf("%04x: ", i);
+				fprintf(stderr, "%04x: ", i);
 			}
-			printf("%02x ", *(unsigned char*)(p+i));
+			fprintf(stderr, "%02x ", *(unsigned char*)(p+i));
 
 			if(i>0 && !((i+1)%line)){
-				printf("\n");
+				fprintf(stderr, "\n");
 			}
 		}
 	}
 
 	waf = kv_nvme_get_waf(handle) / 10;
-	printf("WAF Before doing I/O: %f\n", waf);
+	fprintf(stderr, "WAF Before doing I/O: %f\n", waf);
 
 	kv_pair** kv = (kv_pair**)malloc(sizeof(kv_pair*) * insert_count);
 	if(!kv){
@@ -142,9 +142,14 @@ int iterate() {
 			return -ENOMEM;
 
 		kv[i]->keyspace_id = KV_KEYSPACE_IODATA;
-		kv[i]->key.key = malloc(key_length + 1);
+		int key_buffer_size = key_length;
+		if(key_length%4){
+			key_buffer_size += (4-key_length%4);
+		}
+		kv[i]->key.key = kv_zalloc(key_buffer_size);
 		if(!kv[i]->key.key)
 			return -ENOMEM;
+		memcpy(kv[i]->key.key + ((size_t)key_length > sizeof(int) ? (key_length - sizeof(i)) : 0), &i, MIN((size_t)key_length, sizeof(int)));
 		kv[i]->key.length = key_length;
 
 		kv[i]->value.value = kv_zalloc(value_size);
@@ -171,15 +176,16 @@ int iterate() {
 	gettimeofday(&end, NULL);
 	show_elapsed_time(&start, &end, "Setup App", insert_count, 0, NULL);
 
-
 	//NVME Write
+	for(i = 0; i < insert_count; i++){
+		kv[i]->param.io_option.store_option = KV_STORE_DEFAULT;
+	}
+
 	gettimeofday(&start, NULL);
 	for(i = 0; i < insert_count; i++){
 		if(!(i % 10000)){
 			fprintf(stderr, "kv_nvme_write: %d\n", i);
 		}
-		sprintf(kv[i]->key.key, "%04x%04xmountain",i,i);
-		kv[i]->param.io_option.store_option = KV_STORE_DEFAULT;
 		if(kv_nvme_write(handle, qid, kv[i]))
 			return -EINVAL;
 	}
@@ -192,13 +198,15 @@ int iterate() {
 	}
 
 	//NVMe Read
+	for(i = 0; i < insert_count; i++){
+		kv[i]->param.io_option.store_option = KV_RETRIEVE_DEFAULT;
+	}
+
 	gettimeofday(&start, NULL);
 	for(i = 0; i < insert_count; i++){
 		if(!(i % 10000)){
 			fprintf(stderr, "kv_nvme_read: %d\n", i);
 		}
-		sprintf(kv[i]->key.key, "%04x%04xmountain",i,i);
-		kv[i]->param.io_option.retrieve_option = KV_RETRIEVE_DEFAULT;
 		if(kv_nvme_read(handle, qid, kv[i]))
 			return -EINVAL;
 	}
@@ -215,7 +223,7 @@ int iterate() {
 	kv_iterate_handle_info info[KV_MAX_ITERATE_HANDLE];
 	ret = kv_nvme_iterate_info(handle, info, nr_iterate_handle);
 	if(ret == KV_SUCCESS){
-		printf("iterate_handle count=%d\n",nr_iterate_handle);
+		fprintf(stderr, "iterate_handle count=%d\n",nr_iterate_handle);
 		for(i=0;i<nr_iterate_handle;i++){
 			fprintf(stderr, "iterate_handle_info[%d] : info.handle_id=%d info.status=%d info.type=%d info.prefix=%08x info.bitmask=%08x info.is_eof=%d\n",
 				i+1, info[i].handle_id, info[i].status, info[i].type, info[i].prefix, info[i].bitmask, info[i].is_eof);
@@ -228,22 +236,22 @@ int iterate() {
 
 	//TODO : option
 	//Iterate
-	printf("Iterate Open\n");
+	fprintf(stderr, "Iterate Open\n");
 	uint32_t bitmask = 0xFFFF;
 	//uint32_t prefix = 0x1234;
 	uint32_t prefix;
 	memcpy(&prefix,kv[0]->key.key,2);
 	uint32_t iterator = KV_INVALID_ITERATE_HANDLE;
 	uint8_t keyspace_id = KV_KEYSPACE_IODATA;
-	printf("[%s] keyspace_id=%d bitmask=%x bit_pattern=%x\n",__FUNCTION__,keyspace_id, bitmask, prefix);
+	fprintf(stderr, "[%s] keyspace_id=%d bitmask=%x bit_pattern=%x\n",__FUNCTION__,keyspace_id, bitmask, prefix);
 	gettimeofday(&start, NULL);
-	//iterator = kv_nvme_iterate_open(handle, keyspace_id, bitmask, prefix, KV_KEY_ITERATE);
-	iterator = kv_nvme_iterate_open(handle, keyspace_id, bitmask, prefix, KV_KEY_ITERATE_WITH_RETRIEVE);
+	iterator = kv_nvme_iterate_open(handle, keyspace_id, bitmask, prefix, KV_KEY_ITERATE);
+	//iterator = kv_nvme_iterate_open(handle, keyspace_id, bitmask, prefix, KV_KEY_ITERATE_WITH_RETRIEVE);  // Note: general kv ssd no longer supports KV_KEY_ITERATE_WITH_RETRIEVE
 	gettimeofday(&end, NULL);
 	show_elapsed_time(&start,&end,"kv_iterate_open",1, 0, NULL);
-	if(iterator != KV_INVALID_ITERATE_HANDLE){
-		printf("Iterate open success : iterator id=%d\n", iterator);
-		printf("Iterate Read\n");
+	if(iterator != KV_INVALID_ITERATE_HANDLE && iterator != KV_ERR_ITERATE_ERROR){
+		fprintf(stderr, "Iterate open success : iterator id=%d\n", iterator);
+		fprintf(stderr, "Iterate Read\n");
 
 		gettimeofday(&start, NULL);
 		while(iterate_read_count--){
@@ -253,34 +261,33 @@ int iterate() {
 			it->kv.value.offset = 0;
 			memset(it->kv.value.value, 0, it->kv.value.length);
 			ret = kv_nvme_iterate_read(handle, qid, it);
-			printf("Iterate Read Result: it->value.length=%d ret=%d\n", it->kv.value.length, ret);
-			printf("Iterate Read Result: it->value.value=%s\n", (char*)it->kv.value.value);
+			fprintf(stderr, "Iterate Read Result: it->value.length=%d ret=%d\n", it->kv.value.length, ret);
+			fprintf(stderr, "Iterate Read Result: it->value.value=%s\n", (char*)it->kv.value.value);
 		}
 		gettimeofday(&end, NULL);
 		show_elapsed_time(&start,&end,"kv_iterate_read",1, 0, NULL);
 
-		printf("Iterate Close\n");
+		fprintf(stderr, "Iterate Close\n");
 		gettimeofday(&start, NULL);
 		ret = kv_nvme_iterate_close(handle, iterator);
 		gettimeofday(&end, NULL);
 		show_elapsed_time(&start,&end,"kv_iterate_close",1, 0, NULL);
-		printf("iterate Close Result: ret=%d\n", ret);
+		fprintf(stderr, "iterate Close Result: ret=%d\n", ret);
 	}
 	else{
-		printf("Iterate open failed : iterator id=%d\n", iterator);
+		fprintf(stderr, "Iterate open failed : iterator =%d\n", iterator);
 	}
 
 	//NVMe Delete
 	for(i = 0; i < insert_count; i++){
-		memset(kv[i]->key.key,0,key_length);
+		kv[i]->param.io_option.store_option = KV_DELETE_DEFAULT;
 	}
+
 	gettimeofday(&start, NULL);
 	for(i = 0; i < insert_count; i++){
 		if(!(i%10000)){
 			fprintf(stderr,"kv_nvme_delete: %d\n",i);
 		}
-		sprintf(kv[i]->key.key, "%04x%04xmountain",i,i);
-		kv[i]->param.io_option.delete_option = KV_DELETE_DEFAULT;
 		if(kv_nvme_delete(handle, qid, kv[i]))
 			return -EINVAL;
 	}
@@ -298,7 +305,7 @@ int iterate() {
 			fprintf(stderr, "Teardown Memory: %d\n", i);
 		}
 		if(kv[i]->value.value) kv_free(kv[i]->value.value);
-		if(kv[i]->key.key) free(kv[i]->key.key);
+		if(kv[i]->key.key) kv_free(kv[i]->key.key);
 		if(kv[i]) free(kv[i]);
 	}
 
@@ -308,7 +315,7 @@ int iterate() {
 	show_elapsed_time(&start, &end, "Teardown Memory", insert_count, 0, NULL);
 
 	waf = kv_nvme_get_waf(handle) / 10;
-	printf("WAF After doing I/O: %f\n", waf);
+	fprintf(stderr, "WAF After doing I/O: %f\n", waf);
 
 	//Init Cache
 	gettimeofday(&start, NULL);

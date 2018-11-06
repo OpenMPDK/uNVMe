@@ -1,7 +1,7 @@
 //  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-//  This source code is licensed under the BSD-style license found in the
-//  LICENSE file in the root directory of this source tree. An additional grant
-//  of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 //
 #ifndef ROCKSDB_LITE
 #include "rocksdb/utilities/ldb_cmd.h"
@@ -14,20 +14,23 @@
 
 #include "db/db_impl.h"
 #include "db/dbformat.h"
-#include "db/filename.h"
 #include "db/log_reader.h"
 #include "db/write_batch_internal.h"
 #include "port/dirent.h"
 #include "rocksdb/cache.h"
 #include "rocksdb/table_properties.h"
 #include "rocksdb/utilities/backupable_db.h"
+#include "rocksdb/utilities/checkpoint.h"
+#include "rocksdb/utilities/debug.h"
 #include "rocksdb/utilities/object_registry.h"
+#include "rocksdb/utilities/options_util.h"
 #include "rocksdb/write_batch.h"
 #include "rocksdb/write_buffer_manager.h"
 #include "table/scoped_arena_iterator.h"
 #include "tools/ldb_cmd_impl.h"
 #include "tools/sst_dump_tool_imp.h"
 #include "util/coding.h"
+#include "util/filename.h"
 #include "util/stderr_logger.h"
 #include "util/string_util.h"
 #include "utilities/ttl/db_ttl_impl.h"
@@ -54,6 +57,9 @@ const std::string LDBCommand::ARG_TTL = "ttl";
 const std::string LDBCommand::ARG_TTL_START = "start_time";
 const std::string LDBCommand::ARG_TTL_END = "end_time";
 const std::string LDBCommand::ARG_TIMESTAMP = "timestamp";
+const std::string LDBCommand::ARG_TRY_LOAD_OPTIONS = "try_load_options";
+const std::string LDBCommand::ARG_IGNORE_UNKNOWN_OPTIONS =
+    "ignore_unknown_options";
 const std::string LDBCommand::ARG_FROM = "from";
 const std::string LDBCommand::ARG_TO = "to";
 const std::string LDBCommand::ARG_MAX_KEYS = "max_keys";
@@ -222,6 +228,10 @@ LDBCommand* LDBCommand::SelectCommand(const ParsedParams& parsed_params) {
     return new CheckConsistencyCommand(parsed_params.cmd_params,
                                        parsed_params.option_map,
                                        parsed_params.flags);
+  } else if (parsed_params.cmd == CheckPointCommand::Name()) {
+    return new CheckPointCommand(parsed_params.cmd_params,
+                                 parsed_params.option_map,
+                                 parsed_params.flags);
   } else if (parsed_params.cmd == RepairCommand::Name()) {
     return new RepairCommand(parsed_params.cmd_params, parsed_params.option_map,
                              parsed_params.flags);
@@ -243,6 +253,12 @@ void LDBCommand::Run() {
 
   if (db_ == nullptr && !NoDBOpen()) {
     OpenDB();
+    if (exec_state_.IsFailed() && try_load_options_) {
+      // We don't always return if there is a failure because a WAL file or
+      // manifest file can be given to "dump" command so we should continue.
+      // --try_load_options is not valid in those cases.
+      return;
+    }
   }
 
   // We'll intentionally proceed even if the DB can't be opened because users
@@ -267,6 +283,9 @@ LDBCommand::LDBCommand(const std::map<std::string, std::string>& options,
       is_value_hex_(false),
       is_db_ttl_(false),
       timestamp_(false),
+      try_load_options_(false),
+      ignore_unknown_options_(false),
+      create_if_missing_(false),
       option_map_(options),
       flags_(flags),
       valid_cmd_line_options_(valid_cmd_line_options) {
@@ -286,10 +305,29 @@ LDBCommand::LDBCommand(const std::map<std::string, std::string>& options,
   is_value_hex_ = IsValueHex(options, flags);
   is_db_ttl_ = IsFlagPresent(flags, ARG_TTL);
   timestamp_ = IsFlagPresent(flags, ARG_TIMESTAMP);
+  try_load_options_ = IsFlagPresent(flags, ARG_TRY_LOAD_OPTIONS);
+  ignore_unknown_options_ = IsFlagPresent(flags, ARG_IGNORE_UNKNOWN_OPTIONS);
 }
 
 void LDBCommand::OpenDB() {
-  Options opt = PrepareOptionsForOpenDB();
+  Options opt;
+  bool opt_set = false;
+  if (!create_if_missing_ && try_load_options_) {
+    Status s = LoadLatestOptions(db_path_, Env::Default(), &opt,
+                                 &column_families_, ignore_unknown_options_);
+    if (s.ok()) {
+      opt_set = true;
+    } else if (!s.IsNotFound()) {
+      // Option file exists but load option file error.
+      std::string msg = s.ToString();
+      exec_state_ = LDBCommandExecuteResult::Failed(msg);
+      db_ = nullptr;
+      return;
+    }
+  }
+  if (!opt_set) {
+    opt = PrepareOptionsForOpenDB();
+  }
   if (!exec_state_.IsNotStarted()) {
     return;
   }
@@ -309,7 +347,7 @@ void LDBCommand::OpenDB() {
     }
     db_ = db_ttl_;
   } else {
-    if (column_families_.empty()) {
+    if (!opt_set && column_families_.empty()) {
       // Try to figure out column family lists
       std::vector<std::string> cf_list;
       st = DB::ListColumnFamilies(DBOptions(), db_path_, &cf_list);
@@ -403,6 +441,8 @@ std::vector<std::string> LDBCommand::BuildCmdLineOptions(
                                   ARG_WRITE_BUFFER_SIZE,
                                   ARG_FILE_SIZE,
                                   ARG_FIX_PREFIX_LEN,
+                                  ARG_TRY_LOAD_OPTIONS,
+                                  ARG_IGNORE_UNKNOWN_OPTIONS,
                                   ARG_CF_NAME};
   ret.insert(ret.end(), options.begin(), options.end());
   return ret;
@@ -802,7 +842,6 @@ DBLoaderCommand::DBLoaderCommand(
           BuildCmdLineOptions({ARG_HEX, ARG_KEY_HEX, ARG_VALUE_HEX, ARG_FROM,
                                ARG_TO, ARG_CREATE_IF_MISSING, ARG_DISABLE_WAL,
                                ARG_BULK_LOAD, ARG_COMPACT})),
-      create_if_missing_(false),
       disable_wal_(false),
       bulk_load_(false),
       compact_(false) {
@@ -1177,56 +1216,33 @@ void InternalDumpCommand::DoCommand() {
   }
 
   // Cast as DBImpl to get internal iterator
-  DBImpl* idb = dynamic_cast<DBImpl*>(db_);
-  if (!idb) {
-    exec_state_ = LDBCommandExecuteResult::Failed("DB is not DBImpl");
+  std::vector<KeyVersion> key_versions;
+  Status st = GetAllKeyVersions(db_, from_, to_, &key_versions);
+  if (!st.ok()) {
+    exec_state_ = LDBCommandExecuteResult::Failed(st.ToString());
     return;
   }
   std::string rtype1, rtype2, row, val;
   rtype2 = "";
   uint64_t c=0;
   uint64_t s1=0,s2=0;
-  // Setup internal key iterator
-  Arena arena;
-  auto icmp = InternalKeyComparator(options_.comparator);
-  RangeDelAggregator range_del_agg(icmp, {} /* snapshots */);
-  ScopedArenaIterator iter(idb->NewInternalIterator(&arena, &range_del_agg));
-  Status st = iter->status();
-  if (!st.ok()) {
-    exec_state_ =
-        LDBCommandExecuteResult::Failed("Iterator error:" + st.ToString());
-  }
-
-  if (has_from_) {
-    InternalKey ikey;
-    ikey.SetMaxPossibleForUserKey(from_);
-    iter->Seek(ikey.Encode());
-  } else {
-    iter->SeekToFirst();
-  }
 
   long long count = 0;
-  for (; iter->Valid(); iter->Next()) {
-    ParsedInternalKey ikey;
-    if (!ParseInternalKey(iter->key(), &ikey)) {
-      fprintf(stderr, "Internal Key [%s] parse error!\n",
-              iter->key().ToString(true /* in hex*/).data());
-      // TODO: add error counter
-      continue;
-    }
-
-    // If end marker was specified, we stop before it
-    if (has_to_ && options_.comparator->Compare(ikey.user_key, to_) >= 0) {
+  for (auto& key_version : key_versions) {
+    InternalKey ikey(key_version.user_key, key_version.sequence,
+                     static_cast<ValueType>(key_version.type));
+    if (has_to_ && ikey.user_key() == to_) {
+      // GetAllKeyVersions() includes keys with user key `to_`, but idump has
+      // traditionally excluded such keys.
       break;
     }
-
     ++count;
     int k;
     if (count_delim_) {
       rtype1 = "";
       s1=0;
-      row = iter->key().ToString();
-      val = iter->value().ToString();
+      row = ikey.Encode().ToString();
+      val = key_version.value;
       for(k=0;row[k]!='\x01' && row[k]!='\0';k++)
         s1++;
       for(k=0;val[k]!='\x01' && val[k]!='\0';k++)
@@ -1243,12 +1259,12 @@ void InternalDumpCommand::DoCommand() {
         c++;
         s2+=s1;
         rtype2=rtype1;
+      }
     }
-  }
 
     if (!count_only_ && !count_delim_) {
       std::string key = ikey.DebugString(is_key_hex_);
-      std::string value = iter->value().ToString(is_value_hex_);
+      std::string value = Slice(key_version.value).ToString(is_value_hex_);
       std::cout << key << " => " << value << "\n";
     }
 
@@ -1651,7 +1667,7 @@ void ReduceDBLevelsCommand::DoCommand() {
   old_levels_ = old_level_num;
 
   OpenDB();
-  if (!db_) {
+  if (exec_state_.IsFailed()) {
     return;
   }
   // Compact the whole DB to put all files to the highest level.
@@ -2135,6 +2151,7 @@ BatchPutCommand::BatchPutCommand(
           is_value_hex_ ? HexToString(value) : value));
     }
   }
+  create_if_missing_ = IsFlagPresent(flags_, ARG_CREATE_IF_MISSING);
 }
 
 void BatchPutCommand::Help(std::string& ret) {
@@ -2167,7 +2184,7 @@ void BatchPutCommand::DoCommand() {
 
 Options BatchPutCommand::PrepareOptionsForOpenDB() {
   Options opt = LDBCommand::PrepareOptionsForOpenDB();
-  opt.create_if_missing = IsFlagPresent(flags_, ARG_CREATE_IF_MISSING);
+  opt.create_if_missing = create_if_missing_;
   return opt;
 }
 
@@ -2419,6 +2436,7 @@ PutCommand::PutCommand(const std::vector<std::string>& params,
   if (is_value_hex_) {
     value_ = HexToString(value_);
   }
+  create_if_missing_ = IsFlagPresent(flags_, ARG_CREATE_IF_MISSING);
 }
 
 void PutCommand::Help(std::string& ret) {
@@ -2444,7 +2462,7 @@ void PutCommand::DoCommand() {
 
 Options PutCommand::PrepareOptionsForOpenDB() {
   Options opt = LDBCommand::PrepareOptionsForOpenDB();
-  opt.create_if_missing = IsFlagPresent(flags_, ARG_CREATE_IF_MISSING);
+  opt.create_if_missing = create_if_missing_;
   return opt;
 }
 
@@ -2559,6 +2577,47 @@ void CheckConsistencyCommand::DoCommand() {
     fprintf(stdout, "OK\n");
   } else {
     exec_state_ = LDBCommandExecuteResult::Failed(st.ToString());
+  }
+}
+
+// ----------------------------------------------------------------------------
+
+const std::string CheckPointCommand::ARG_CHECKPOINT_DIR = "checkpoint_dir";
+
+CheckPointCommand::CheckPointCommand(
+    const std::vector<std::string>& params,
+    const std::map<std::string, std::string>& options,
+    const std::vector<std::string>& flags)
+    : LDBCommand(options, flags, false /* is_read_only */,
+                 BuildCmdLineOptions({ARG_CHECKPOINT_DIR})) {
+  auto itr = options.find(ARG_CHECKPOINT_DIR);
+  if (itr == options.end()) {
+    exec_state_ = LDBCommandExecuteResult::Failed(
+        "--" + ARG_CHECKPOINT_DIR + ": missing checkpoint directory");
+  } else {
+    checkpoint_dir_ = itr->second;
+  }
+}
+
+void CheckPointCommand::Help(std::string& ret) {
+  ret.append("  ");
+  ret.append(CheckPointCommand::Name());
+  ret.append(" [--" + ARG_CHECKPOINT_DIR + "] ");
+  ret.append("\n");
+}
+
+void CheckPointCommand::DoCommand() {
+  if (!db_) {
+    assert(GetExecuteState().IsFailed());
+    return;
+  }
+  Checkpoint* checkpoint;
+  Status status = Checkpoint::Create(db_, &checkpoint);
+  status = checkpoint->CreateCheckpoint(checkpoint_dir_);
+  if (status.ok()) {
+    printf("OK\n");
+  } else {
+    exec_state_ = LDBCommandExecuteResult::Failed(status.ToString());
   }
 }
 

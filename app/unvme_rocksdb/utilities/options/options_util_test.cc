@@ -1,7 +1,7 @@
 //  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-//  This source code is licensed under the BSD-style license found in the
-//  LICENSE file in the root directory of this source tree. An additional grant
-//  of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 
 #ifndef ROCKSDB_LITE
 #ifndef __STDC_FORMAT_MACROS
@@ -13,10 +13,10 @@
 #include <cctype>
 #include <unordered_map>
 
+#include "options/options_parser.h"
 #include "rocksdb/db.h"
 #include "rocksdb/table.h"
 #include "rocksdb/utilities/options_util.h"
-#include "util/options_parser.h"
 #include "util/random.h"
 #include "util/testharness.h"
 #include "util/testutil.h"
@@ -232,7 +232,7 @@ TEST_F(OptionsUtilTest, SanityCheck) {
         CheckOptionsCompatibility(dbname_, Env::Default(), db_opt, cf_descs));
 
     cf_descs[1].options.prefix_extractor.reset(new DummySliceTransform());
-    ASSERT_NOK(
+    ASSERT_OK(
         CheckOptionsCompatibility(dbname_, Env::Default(), db_opt, cf_descs));
 
     cf_descs[1].options.prefix_extractor = prefix_extractor;

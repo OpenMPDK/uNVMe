@@ -49,17 +49,17 @@
 #define SECTOR_SIZE (512)
 
 int udd_perf() {
-	printf("%s start\n",__FUNCTION__);
+	fprintf(stderr, "%s start\n",__FUNCTION__);
 
 	int i;
 	int ret = -EINVAL;
 
 	//NOTE : check pci information first using lspci -v 
-	char *nvme_pci_dev = "0000:0a:00.0";
+	char *nvme_pci_dev = "0000:02:00.0";
 
 	int ssd_type = KV_TYPE_SSD;
-	int key_length = 16;
-	int value_size = 4096;
+	int key_length = 16;   //NOTE: key_length: 4~255B
+	int value_size = 4096; //NOTE: value_size: 0~2048KB
 	int insert_count = 10 * 10000;
 	int qid = DEFAULT_IO_QUEUE_ID;
 
@@ -82,8 +82,10 @@ int udd_perf() {
 	gettimeofday(&start, NULL);
 	kv_env_init(options.mem_size_mb);
 	ret = kv_nvme_init(nvme_pci_dev, &options, ssd_type);
-	if(ret)
+	if(ret){
+		fprintf(stderr,"kv_nvme_init ret=%d\n",ret);
 		return ret;
+	}
 
 	cpu_set_t cpuset;
 	CPU_ZERO(&cpuset);
@@ -91,28 +93,30 @@ int udd_perf() {
 	sched_setaffinity(0, sizeof(cpu_set_t), &cpuset);
 
 	uint64_t handle = kv_nvme_open(nvme_pci_dev);
-	if(!handle)
+	if(!handle){
+		fprintf(stderr,"kv_nvme_open handle=%ld\n",handle);
 		return ret;
+	}
 	gettimeofday(&end, NULL);
 	show_elapsed_time(&start, &end, "nvme_init", 0, 0, NULL);
 
 	uint64_t total_size = kv_nvme_get_total_size(handle);
 	if(total_size != KV_ERR_INVALID_VALUE){
-		printf("Total Size of the NVMe Device: %lld MB\n", (unsigned long long)total_size / MB);
+		fprintf(stderr,"Total Size of the NVMe Device: %lld MB\n", (unsigned long long)total_size / MB);
 	}
 	uint64_t used_size = kv_nvme_get_used_size(handle);
 	if(used_size != KV_ERR_INVALID_VALUE){
 		if(ssd_type == KV_TYPE_SSD){
-			printf("Used Size of the NVMe Device: %.2f %s \n", (float)used_size / 100, "%");
+			fprintf(stderr,"Used Size of the NVMe Device: %.2f %s \n", (float)used_size / 100, "%");
 		}
 		else{
-			printf("Used Size of the NVMe Device: %lld MB\n", (unsigned long long)used_size / MB);
+			fprintf(stderr,"Used Size of the NVMe Device: %lld MB\n", (unsigned long long)used_size / MB);
 		}
 	}
 
         double waf = kv_nvme_get_waf(handle) / 10;
 	if(waf != KV_ERR_INVALID_VALUE){
-		printf("WAF Before doing I/O: %f\n", waf);
+		fprintf(stderr,"WAF Before doing I/O: %f\n", waf);
 	}
 
 	unsigned long long (*hash_value)[2] = (unsigned long long(*)[2])malloc(sizeof(unsigned long long [2]) * insert_count);
@@ -122,10 +126,11 @@ int udd_perf() {
 		if(kv) free(kv);
 		if(hash_value) free(hash_value);
 		if(stamps) free(stamps);
+		fprintf(stderr,"fail to alloc variables\n");
 		return -ENOMEM;
 	}
 
-	printf("%s key_length = %d value_size = %d insert_count = %d\n", __FUNCTION__, key_length, value_size, insert_count);
+	fprintf(stderr,"%s key_length = %d value_size = %d insert_count = %d\n", __FUNCTION__, key_length, value_size, insert_count);
 	int fd = open("/dev/srandom", O_RDONLY);
 	if (fd < 3){
 		fd = open("/dev/urandom", O_RDONLY);
@@ -140,34 +145,57 @@ int udd_perf() {
 		}
 
 		kv[i] = (kv_pair*)malloc(sizeof(kv_pair));
-		if(!kv[i])
+		if(!kv[i]){
+			fprintf(stderr,"fail to alloc kv pair\n");
 			return -ENOMEM;
+		}
 
 		kv[i]->keyspace_id = KV_KEYSPACE_IODATA;
-		kv[i]->key.key = kv_zalloc(key_length);
-		if(!kv[i]->key.key)
+		int key_buffer_size = key_length;
+		if(key_length%4){
+			key_buffer_size += (4-key_length%4);
+		}
+		kv[i]->key.key = kv_zalloc(key_buffer_size);
+		if(!kv[i]->key.key){
+			fprintf(stderr,"fail to alloc key buffer\n");
 			return -ENOMEM;
+		}
 		kv[i]->key.length = key_length;
 		if(host_hash == 0){
 			if(ssd_type == LBA_TYPE_SSD) {
 				*(uint64_t*)(kv[i]->key.key) = i * (value_size / SECTOR_SIZE);
 			} else {
-				sprintf(kv[i]->key.key, "mountain%08x", i);
+				memcpy(kv[i]->key.key, &i, MIN((size_t)key_length, sizeof(i)));
 			}
 		}
 		else{
 			memcpy(kv[i]->key.key, hash_value[i], key_length);
 		}
-		kv[i]->value.value = kv_zalloc(value_size);
-		if(!kv[i]->value.value)
-			return -ENOMEM;
-		memset(kv[i]->value.value, 'a'+(i%26), value_size);
+
+		if(value_size){
+			int value_buffer_size = value_size;
+			if(value_size%4){
+				value_buffer_size += (4-value_size%4);
+			}
+			kv[i]->value.value = kv_zalloc(value_buffer_size);
+			if(!kv[i]->value.value){
+				fprintf(stderr,"fail to alloc value buffer\n");
+				return -ENOMEM;
+			}
+			memset(kv[i]->value.value, 'a'+(i%26), value_size);
+		}
+		else{
+			kv[i]->value.value = NULL;
+		}
 		kv[i]->value.length = value_size;
+		kv[i]->value.actual_value_size = 0;
 		kv[i]->value.offset = 0;
 
 		if(check_miscompare){
-			if (read(fd, kv[i]->value.value, value_size) != value_size)
+			if (read(fd, kv[i]->value.value, value_size) != value_size){
+				fprintf(stderr,"fail to read miscompare value\n");
 				return -EIO;
+			}
 			Hash128_2_P128(kv[i]->value.value, value_size, seed, hash_value[i]);
 		}
 	}
@@ -188,10 +216,12 @@ int udd_perf() {
 			fprintf(stderr, "%d ", i);
 		}
 
-		//printf("key=%s\n",(char*)kv->key.key);
 		gettimeofday(&stamps[i].start, NULL);
-		if(kv_nvme_write(handle, qid, kv[i]))
-			return -EINVAL;
+		int ret = kv_nvme_write(handle, qid, kv[i]);
+		if(ret != KV_SUCCESS){
+			fprintf(stderr, "kv_nvme_write ret=%d\n",ret);
+			//return -EINVAL;
+		}
 		gettimeofday(&stamps[i].end, NULL);
 	}
 	gettimeofday(&end, NULL);
@@ -217,8 +247,11 @@ int udd_perf() {
 		}
 
 		gettimeofday(&stamps[i].start, NULL);
-		if(kv_nvme_read(handle, qid, kv[i]))
-			return -EINVAL;
+		ret = kv_nvme_read(handle, qid, kv[i]);
+		if(ret != KV_SUCCESS){
+			fprintf(stderr, "kv_nvme_read ret=%d\n",ret);
+			//return -EINVAL;
+		}
 		gettimeofday(&stamps[i].end, NULL);
 	}
 	gettimeofday(&end, NULL);
@@ -256,8 +289,11 @@ int udd_perf() {
 		}
 
 		gettimeofday(&stamps[i].start, NULL);
-		if(kv_nvme_delete(handle, qid, kv[i]))
-			return -EINVAL;
+		ret = kv_nvme_delete(handle, qid, kv[i]);
+		if(ret != KV_SUCCESS){
+			fprintf(stderr, "kv_nvme_delete ret=%d\n",ret);
+			//return -EINVAL;
+		}
 		gettimeofday(&stamps[i].end, NULL);
 	}
 	gettimeofday(&end, NULL);
@@ -288,19 +324,21 @@ int udd_perf() {
 
         waf = kv_nvme_get_waf(handle) / 10;
 	if(waf != KV_ERR_INVALID_VALUE){
-		printf("WAF After doing I/O: %f\n", waf);
+		fprintf(stderr, "WAF After doing I/O: %f\n", waf);
 	}
 
 
 	//Init Cache
 	gettimeofday(&start, NULL);
 	ret = kv_nvme_close(handle);
-	if(ret)
-		return ret;
+	if(ret){
+		fprintf(stderr,"kv_nvme_close ret=%d\n", ret);
+	}
 
 	ret = kv_nvme_finalize(nvme_pci_dev);
-	if(ret)
-		return ret;
+	if(ret){
+		fprintf(stderr,"kv_nvme_finalize ret=%d\n", ret);
+	}
 	gettimeofday(&end, NULL);
 	show_elapsed_time(&start, &end, "nvme_finalize", 0, 0, NULL);
 	return 0;

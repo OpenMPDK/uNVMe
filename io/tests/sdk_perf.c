@@ -47,14 +47,6 @@
 #define DISPLAY_CNT (10000)
 #define SECTOR_SIZE (512)
 
-#define fail_unless(_c) do{     \
-        if(!(_c)){              \
-                printf("fail!!\n"); \
-                exit(-1);       \
-        }                       \
-}while(0)
-
-
 typedef struct {
 	int tid;
 	int core_id;
@@ -85,6 +77,7 @@ void* sdk_write(void* data) {
 	int i, tid = param->tid;
 	int core_id = param->core_id;
 	uint64_t handle = param->device_handle;
+	int ret = KV_SUCCESS;
 
 	//set affinity as core_id
 	cpu_set_t cpuset;
@@ -99,7 +92,7 @@ void* sdk_write(void* data) {
                         *((uint64_t*)(kv[i]->key.key)) = i * (kv[i]->value.length / SECTOR_SIZE);
 			kv[i]->key.length = 8;
                 } else {
-                        sprintf(kv[i]->key.key, "%04d%12d",tid,i);
+                        memcpy(kv[i]->key.key, &i, MIN((size_t)kv[i]->key.length, sizeof(i)));
                 }
 		kv[i]->param.io_option.store_option = KV_STORE_DEFAULT;
 		kv[i]->param.private_data = NULL;
@@ -113,7 +106,10 @@ void* sdk_write(void* data) {
 			fprintf(stderr, "%d ", (i - (tid * insert_count)));
 		}
 		gettimeofday(&stamps[i].start, NULL);
-		fail_unless(KV_SUCCESS == kv_store(handle, kv[i]));
+		ret = kv_store(handle, kv[i]);
+		if(ret != KV_SUCCESS){
+			fprintf(stderr,"kv_store failed ret = %d\n",ret);
+		}
 		gettimeofday(&stamps[i].end, NULL);
 	}
 	gettimeofday(param->t_end, NULL);
@@ -125,6 +121,7 @@ void* sdk_read(void* data) {
         int i, tid = param->tid;
         int core_id = param->core_id;
         uint64_t handle = param->device_handle;
+	int ret = KV_SUCCESS;
 
 	//set affinity as core_id
 	cpu_set_t cpuset;
@@ -139,7 +136,7 @@ void* sdk_read(void* data) {
                         *((uint64_t*)(kv[i]->key.key)) = i * (kv[i]->value.length / SECTOR_SIZE);
 			kv[i]->key.length = 8;
                 } else {
-                        sprintf(kv[i]->key.key, "%04d%12d",tid,i);
+                        memcpy(kv[i]->key.key, &i, MIN((size_t)kv[i]->key.length, sizeof(i)));
                 }
 		kv[i]->param.io_option.retrieve_option = KV_RETRIEVE_DEFAULT;
 		kv[i]->param.private_data = NULL;
@@ -153,7 +150,10 @@ void* sdk_read(void* data) {
 			fprintf(stderr, "%d ", (i - (tid * insert_count)));
 		}
 		gettimeofday(&stamps[i].start, NULL);
-		fail_unless(0 == kv_retrieve(handle, kv[i]));
+		ret = kv_retrieve(handle, kv[i]);
+		if(ret != KV_SUCCESS){
+			fprintf(stderr,"kv_retrieve failed ret = %d\n",ret);
+		}
 		gettimeofday(&stamps[i].end, NULL);
 	}
 	gettimeofday(param->t_end, NULL);
@@ -162,9 +162,10 @@ void* sdk_read(void* data) {
 
 void* sdk_exist(void* data) {
         thread_param *param = (thread_param*)data;
-        int ret, i, tid = param->tid;
+        int i, tid = param->tid;
         int core_id = param->core_id;
         uint64_t handle = param->device_handle;
+	int ret = KV_SUCCESS;
 
 	//set affinity as core_id
 	cpu_set_t cpuset;
@@ -175,7 +176,7 @@ void* sdk_exist(void* data) {
 	fprintf(stderr, "[cid=%d][tid=%d][handle=%lu]kv_exist: ", core_id, tid, handle);
 	//prepare
 	for (i = 0 + (tid * insert_count); i < insert_count + (tid * insert_count); i++) {
-		sprintf(kv[i]->key.key, "%04d%12d", tid, i);
+		memcpy(kv[i]->key.key, &i, MIN((size_t)kv[i]->key.length, sizeof(i)));
 		kv[i]->param.io_option.exist_option = KV_EXIST_DEFAULT;
 		kv[i]->param.private_data = NULL;
 		kv[i]->param.async_cb = NULL;
@@ -188,11 +189,10 @@ void* sdk_exist(void* data) {
 			fprintf(stderr, "%d ", (i - (tid * insert_count)));
 		}
 		gettimeofday(&stamps[i].start, NULL);
-		//fail_unless(g_exist_answer == kv_exist(handle, kv[i]));
 		ret = kv_exist(handle, kv[i]);
 		if(g_exist_answer != ret) {
 			fprintf(stderr, "%s fail: returned status(0x%x) != expected value(0x%x)\n", __FUNCTION__, ret, g_exist_answer);
-			exit(1);
+			//exit(1);
 		}
 		gettimeofday(&stamps[i].end, NULL);
 	}
@@ -205,6 +205,7 @@ void* sdk_delete(void* data) {
         int i, tid = param->tid;
         int core_id = param->core_id;
         uint64_t handle = param->device_handle;
+	int ret = KV_SUCCESS;
 
 	//set affinity as core_id
 	cpu_set_t cpuset;
@@ -219,7 +220,7 @@ void* sdk_delete(void* data) {
 			*((uint64_t*)(kv[i]->key.key)) = i * (kv[i]->value.length / SECTOR_SIZE);
 			kv[i]->key.length = 8;
 		} else {
-			sprintf(kv[i]->key.key, "%04d%12d",tid,i);
+                        memcpy(kv[i]->key.key, &i, MIN((size_t)kv[i]->key.length, sizeof(i)));
 		}
 		kv[i]->param.io_option.delete_option = KV_DELETE_DEFAULT;
 		kv[i]->param.private_data = NULL;
@@ -233,7 +234,10 @@ void* sdk_delete(void* data) {
 			fprintf(stderr, "%d ", (i - (tid * insert_count)));
 		}
 		gettimeofday(&stamps[i].start, NULL);
-		fail_unless(0 == kv_delete(handle, kv[i]));
+		ret = kv_delete(handle, kv[i]);
+		if(ret != KV_SUCCESS){
+			fprintf(stderr,"kv_delete failed ret = %d\n",ret);
+		}
 		gettimeofday(&stamps[i].end, NULL);
 	}
 	gettimeofday(param->t_end, NULL);
@@ -241,7 +245,7 @@ void* sdk_delete(void* data) {
 }
 
 int sdk_perf() {
-	printf("%s start\n", __FUNCTION__);
+	fprintf(stderr, "%s start\n", __FUNCTION__);
 
 	int key_length = 16;
 	int value_size = 4096;
@@ -270,14 +274,20 @@ int sdk_perf() {
 	struct timeval thread_start[MAX_CPU_CORES * NR_MAX_SSD];
 	struct timeval thread_end[MAX_CPU_CORES * NR_MAX_SSD];
 
-	printf("%s value_size=%d insert_count=%d\n", __FUNCTION__, value_size, insert_count);
+	fprintf(stderr, "%s value_size=%d insert_count=%d\n", __FUNCTION__, value_size, insert_count);
 
 	//SDK init
 	gettimeofday(&start, NULL);
 	ret = kv_sdk_load_option(&sdk_opt, "./kv_sdk_sync_config.json"); //load information from config.json to sdk_opt
-	fail_unless(ret == KV_SUCCESS);
+	if(ret != KV_SUCCESS){
+		fprintf(stderr,"kv_sdk_load_option failed ret = %d\n",ret);
+		return -EIO;
+	}
 	ret = kv_sdk_init(KV_SDK_INIT_FROM_STR, &sdk_opt);
-	fail_unless(ret == KV_SUCCESS);
+	if(ret != KV_SUCCESS){
+		fprintf(stderr,"kv_sdk_init failed ret = %d\n",ret);
+		return -EIO;
+	}
 
 	for (i = 0; i < sdk_opt.nr_ssd; i++) {
 		for (int j = 0; j < MAX_CPU_CORES; j++) {
@@ -286,7 +296,7 @@ int sdk_perf() {
 				set_cores[j] = 1;
 				//get accesible cores by current core j
 				ret = kv_get_devices_on_cpu(j, &nr_handle, arr_handle);
-				printf("current core(%d) is allowed to access on handle [", j);
+				fprintf(stderr, "current core(%d) is allowed to access on handle [", j);
 				//make threads which number is same with the number of accessible devices
 				for (int k = 0; k < nr_handle; k++) {
 					printf("%ld,", arr_handle[k]);
@@ -297,7 +307,7 @@ int sdk_perf() {
 					p[nthreads].t_end = &thread_end[nthreads];
 					nthreads++;
 				}
-				printf("]\n");
+				fprintf(stderr, "]\n");
 			}
 		}
 	}
@@ -313,7 +323,10 @@ int sdk_perf() {
 	//Prepare App Memory
 	fprintf(stderr, "Setup App: ");
 	kv = (kv_pair**) malloc(sizeof(kv_pair*) * insert_count * nthreads);
-	fail_unless(kv != NULL);
+	if(!kv){
+		fprintf(stderr,"fail to alloc kv_pair**\n");
+		return -ENOMEM;
+	}
 
 	gettimeofday(&start, NULL);
 	for (i = 0; i < insert_count * nthreads; i++) {
@@ -321,20 +334,33 @@ int sdk_perf() {
 			fprintf(stderr, "%d ", i);
 		}
 		kv[i] = (kv_pair*) malloc(sizeof(kv_pair));
-		fail_unless(kv[i] != NULL);
+		if(!kv){
+			fprintf(stderr,"fail to alloc kv_pair\n");
+			return -ENOMEM;
+		}
 
 		kv[i]->keyspace_id = KV_KEYSPACE_IODATA;
 		kv[i]->key.key = malloc(key_length);
-		fail_unless(kv[i]->key.key != NULL);
+		if(kv[i]->key.key == NULL){
+			fprintf(stderr,"fail to alloc key buffer\n");
+			return -ENOMEM;
+		}
 		kv[i]->key.length = key_length;
 		memset(kv[i]->key.key, 0, key_length);
 
 		kv[i]->value.value = malloc(value_size);
-		fail_unless(kv[i]->value.value != NULL);
+		if(kv[i]->value.value == NULL){
+			fprintf(stderr,"fail to alloc value buffer\n");
+			return -ENOMEM;
+		}
 		kv[i]->value.length = value_size;
+		kv[i]->value.actual_value_size = 0;
 		kv[i]->value.offset = 0;
 		if (check_miscompare) {
-			fail_unless(read(fd, kv[i]->value.value, value_size) == value_size);
+			if(read(fd, kv[i]->value.value, value_size) == value_size){
+				fprintf(stderr,"fail to read miscompare value\n");
+				return -EIO;
+			}
 			Hash128_2_P128(kv[i]->value.value, value_size, seed, hash_value[i]);
 		} else {
 			memset(kv[i]->value.value, 'a' + (i % 26), value_size);
@@ -376,7 +402,11 @@ int sdk_perf() {
 	//Store
 	stamps = (struct time_stamp *) malloc(sizeof(struct time_stamp) * insert_count * nthreads);
 	for (i = 0; i < nthreads; i++) {
-		fail_unless(0 <= pthread_create(&t[i], NULL, sdk_write, &p[i]));
+		ret = pthread_create(&t[i], NULL, sdk_write, &p[i]);
+		if(ret != KV_SUCCESS){
+			fprintf(stderr, " fail to create writer thread(%d)\n", i);
+			return -EIO;
+		}
 	}
 
 	for (i = 0; i < nthreads; i++) {
@@ -390,7 +420,11 @@ int sdk_perf() {
 
 	//Retrieve
 	for (i = 0; i < nthreads; i++) {
-		fail_unless(0 <= pthread_create(&t[i], NULL, sdk_read, &p[i]));
+		ret = pthread_create(&t[i], NULL, sdk_read, &p[i]);
+		if(ret != KV_SUCCESS){
+			fprintf(stderr, " fail to create reader thread(%d)\n", i);
+			return -EIO;
+		}
 	}
 
 	for (i = 0; i < nthreads; i++) {
@@ -420,7 +454,11 @@ int sdk_perf() {
 	if (sdk_opt.ssd_type == KV_TYPE_SSD) {
 		g_exist_answer = KV_SUCCESS;
 		for (i = 0; i < nthreads; i++) {
-			fail_unless(0 <= pthread_create(&t[i], NULL, sdk_exist, &p[i]));
+			ret = pthread_create(&t[i], NULL, sdk_exist, &p[i]);
+			if(ret != KV_SUCCESS){
+				fprintf(stderr, " fail to create exist thread(%d)\n", i);
+				return -EIO;
+			}
 		}
 
 		for (i = 0; i < nthreads; i++) {
@@ -435,7 +473,11 @@ int sdk_perf() {
 
 	// Delete
 	for (i = 0; i < nthreads; i++) {
-		fail_unless(0 <= pthread_create(&t[i], NULL, sdk_delete, &p[i]));
+		ret = pthread_create(&t[i], NULL, sdk_delete, &p[i]);
+		if(ret != KV_SUCCESS){
+			fprintf(stderr, " fail to create delete thread(%d)\n", i);
+			return -EIO;
+		}
 	}
 
 	for (i = 0; i < nthreads; i++) {
@@ -452,7 +494,11 @@ int sdk_perf() {
 	if (sdk_opt.ssd_type == KV_TYPE_SSD) {
 		g_exist_answer = KV_ERR_NOT_EXIST_KEY;
 		for (i = 0; i < nthreads; i++) {
-			fail_unless(0 <= pthread_create(&t[i], NULL, sdk_exist, &p[i]));
+			ret = pthread_create(&t[i], NULL, sdk_exist, &p[i]);
+			if(ret != KV_SUCCESS){
+				fprintf(stderr, " fail to create delete thread(%d)\n", i);
+				return -EIO;
+			}
 		}
 
 		for (i = 0; i < nthreads; i++) {
@@ -480,10 +526,10 @@ int sdk_perf() {
 		used_size = kv_get_used_size(handle);
 		if (used_size != KV_ERR_INVALID_VALUE) {
                         if(sdk_opt.ssd_type == KV_TYPE_SSD){
-                                printf("  -Used Size of the NVMe Device: %.2f %s \n", (float)used_size / 100, "%");
+                                fprintf(stderr, "  -Used Size of the NVMe Device: %.2f %s \n", (float)used_size / 100, "%");
                         }
                         else{
-                                printf("  -Used Size of the NVMe Device: %lld MB\n", (unsigned long long)used_size / MB);
+                                fprintf(stderr, "  -Used Size of the NVMe Device: %lld MB\n", (unsigned long long)used_size / MB);
                         }
 		}
 		waf = kv_get_waf(handle);

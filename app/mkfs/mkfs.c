@@ -38,6 +38,7 @@
 #include "spdk/event.h"
 #include "spdk/blob_bdev.h"
 #include "spdk/log.h"
+#include "spdk/string.h"
 
 #include "kv_types.h"
 #include "kv_apis.h"
@@ -46,6 +47,7 @@
 
 struct spdk_bs_dev *g_bs_dev;
 const char *g_bdev_name;
+static uint64_t g_cluster_size;
 
 static void
 stop_cb(void *ctx, int fserrno)
@@ -75,6 +77,7 @@ static void
 spdk_mkfs_run(void *arg1, void *arg2)
 {
 	struct spdk_bdev *bdev;
+	struct spdk_blobfs_opts blobfs_opt;
 
 	bdev = spdk_bdev_get_by_name(g_bdev_name);
 
@@ -84,16 +87,40 @@ spdk_mkfs_run(void *arg1, void *arg2)
 		return;
 	}
 
-	if (!spdk_bdev_claim(bdev, NULL, NULL)) {
-		SPDK_ERRLOG("could not claim bdev %s\n", g_bdev_name);
-		spdk_app_stop(-1);
-		return;
-	}
-
 	printf("Initializing filesystem on bdev %s...\n", g_bdev_name);
 	fflush(stdout);
-	g_bs_dev = spdk_bdev_create_bs_dev(bdev);
-	spdk_fs_init(g_bs_dev, NULL, init_cb, NULL);
+
+	spdk_fs_opts_init(&blobfs_opt);
+	if (g_cluster_size) {
+		blobfs_opt.cluster_sz = g_cluster_size;
+	}
+	g_bs_dev = spdk_bdev_create_bs_dev(bdev, NULL, NULL);
+	if (blobfs_opt.cluster_sz) {
+		spdk_fs_init(g_bs_dev, &blobfs_opt, NULL, init_cb, NULL);
+	} else {
+		spdk_fs_init(g_bs_dev, NULL, NULL, init_cb, NULL);
+	}
+}
+
+static void
+mkfs_usage(void)
+{
+	printf(" -C cluster size\n");
+}
+
+static void
+mkfs_parse_arg(int ch, char *arg)
+{
+	bool has_prefix;
+
+	switch (ch) {
+	case 'C':
+		spdk_parse_capacity(arg, &g_cluster_size, &has_prefix);
+		break;
+	default:
+		break;
+	}
+
 }
 
 int main(int argc, char **argv)
@@ -103,16 +130,20 @@ int main(int argc, char **argv)
 	char* config_json_path;
 	uint64_t app_hugemem_size_mb;
 	uint64_t fs_cache_size_mb;
-	int rc;
+	int rc = 0;
 
 	if (argc < 3) {
 		fprintf(stderr, "usage: %s <bdevname> <config.json path> \n", argv[0]);
 		fprintf(stderr, "ex) %s unvme_bdev0n1 lba_sdk_config.json \n", argv[0]);
-		exit(1);
+		//exit(1);
+		g_bdev_name = "unvme_bdev0n1";
+		config_json_path = "lba_sdk_config.json";
+	}
+	else{
+		g_bdev_name = argv[1];
+		config_json_path = argv[2];
 	}
 
-	g_bdev_name = argv[1];
-	config_json_path = argv[2];
 	kv_sdk_load_option(&sdk_opt, config_json_path);
 
 	app_hugemem_size_mb = sdk_opt.app_hugemem_size / ((uint64_t)(1024 * 1024));
@@ -123,26 +154,27 @@ int main(int argc, char **argv)
 		fs_cache_size_mb = app_hugemem_size_mb - MIN_APP_HUGEMEM_SIZE_MB;
 	}
 
-	spdk_app_opts_init(&opts);
-	opts.dpdk_mem_size = app_hugemem_size_mb;
-	opts.shutdown_cb = NULL;
-	opts.init_from = KV_SDK_INIT_FROM_JSON;
-	opts.options = (char*)&sdk_opt;
-
-        rc = kv_sdk_init(opts.init_from, config_json_path);
+        rc = kv_sdk_init(KV_SDK_INIT_FROM_STR, &sdk_opt);
         if (rc != KV_SUCCESS) {
                 SPDK_ERRLOG("Error while doing sdk init.\n");
                 exit(EXIT_FAILURE);
         }
 
-	spdk_app_init(&opts);
+	spdk_app_opts_init(&opts);
+	opts.mem_size = app_hugemem_size_mb;
+	opts.shutdown_cb = NULL;
 
 	spdk_fs_set_cache_size(fs_cache_size_mb);
+	if ((rc = spdk_app_parse_args(argc, argv, &opts, "C:",
+				      mkfs_parse_arg, mkfs_usage)) !=
+	    SPDK_APP_PARSE_ARGS_SUCCESS) {
+		exit(rc);
+	}
 
-	spdk_app_start(spdk_mkfs_run, NULL, NULL);
+	rc = spdk_app_start(&opts, spdk_mkfs_run, NULL, NULL);
 	spdk_app_fini();
 
 	kv_sdk_finalize();
 
-	return 0;
+	return rc;
 }

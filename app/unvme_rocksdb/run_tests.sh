@@ -40,8 +40,11 @@ if [ -z "$RESULTS_DIR" ]; then
 fi
 
 : ${CACHE_SIZE:=4096}
-: ${DURATION:=60}
-: ${NUM_KEYS:=1000000}
+: ${DURATION:=36000}
+: ${NUM_KEYS:=1000000000}
+: ${RETAIN_CACHE:=0}
+: ${PREFETCH_CTL:=0}
+: ${READ_REPEAT:=1}
 
 if [ "$NO_SPDK" = "1" ]
 then
@@ -86,8 +89,16 @@ echo "--disable_wal=1" >> insert_flags.txt
 echo "--use_existing_db=0" >> insert_flags.txt
 echo "--num=$NUM_KEYS" >> insert_flags.txt
 
+cp $TESTDIR/common_flags.txt seqread_flags.txt
+echo "--benchmarks=readseq[X$READ_REPEAT]" >> seqread_flags.txt
+echo "--threads=1" >> seqread_flags.txt
+echo "--duration=$DURATION" >> seqread_flags.txt
+echo "--disable_wal=1" >> seqread_flags.txt
+echo "--use_existing_db=1" >> seqread_flags.txt
+echo "--num=$NUM_KEYS" >> seqread_flags.txt
+
 cp $TESTDIR/common_flags.txt randread_flags.txt
-echo "--benchmarks=readrandom" >> randread_flags.txt
+echo "--benchmarks=readrandom[X$READ_REPEAT]" >> randread_flags.txt
 echo "--threads=16" >> randread_flags.txt
 echo "--duration=$DURATION" >> randread_flags.txt
 echo "--disable_wal=1" >> randread_flags.txt
@@ -131,6 +142,8 @@ run_step() {
 	  echo "--mpdk=$CONFIG_JSON" >> "$1"_flags.txt
 	  echo "--spdk_bdev=unvme_bdev0n1" >> "$1"_flags.txt
 	  echo "--spdk_cache_size=$CACHE_SIZE" >> "$1"_flags.txt
+	  echo "--use_retain_cache=$RETAIN_CACHE" >> "$1"_flags.txt
+	  echo "--use_prefetch_ctl=$PREFETCH_CTL" >> "$1"_flags.txt
 	fi
 
 	if [ "$NO_SPDK" = "1" ]
@@ -150,6 +163,7 @@ run_step() {
 
 	if [ "$NO_SPDK" = "1" ]
 	then
+	  drop_caches
 	  cat /sys/block/nvme0n1/stat >> "$1"_blockdev_stats.txt
 	fi
 
@@ -163,9 +177,23 @@ run_step() {
 	fi
 }
 
+drop_caches() {
+        echo -n Cleaning Page Cache...
+        echo 3 > /proc/sys/vm/drop_caches
+        echo done.
+}
+
 if [ -z "$SKIP_INSERT" ]
 then
 	run_step insert
+fi
+if [ -z "$SKIP_SEQREAD" ]
+then
+	run_step seqread
+fi
+if [ -z "$SKIP_RANDREAD" ]
+then
+	run_step randread
 fi
 if [ -z "$SKIP_OVERWRITE" ]
 then
@@ -178,10 +206,6 @@ fi
 if [ -z "$SKIP_WRITESYNC" ]
 then
 	run_step writesync
-fi
-if [ -z "$SKIP_RANDREAD" ]
-then
-	run_step randread
 fi
 
 if [ "$NO_SPDK" = "1" ]

@@ -1,7 +1,9 @@
-export KV_DIR = $(shell pwd)
+export KV_DIR = $(shell pwd)/../
+
+include $(KV_DIR)/mk/unvme.mk
 
 all:
-	make -C core
+	make -C core -f $(MAKEFILE)
 	make -C test
 
 clean:

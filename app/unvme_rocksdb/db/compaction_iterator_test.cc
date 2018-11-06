@@ -1,7 +1,7 @@
 //  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-//  This source code is licensed under the BSD-style license found in the
-//  LICENSE file in the root directory of this source tree. An additional grant
-//  of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 
 #include "db/compaction_iterator.h"
 
@@ -154,6 +154,7 @@ class FakeCompaction : public CompactionIterator::CompactionProxy {
   virtual Slice GetLargestUserKey() const {
     return "\xff\xff\xff\xff\xff\xff\xff\xff\xff";
   }
+  virtual bool allow_ingest_behind() const { return false; }
 
   bool key_not_exists_beyond_output_level = false;
 };
@@ -189,7 +190,7 @@ class CompactionIteratorTest : public testing::Test {
     c_iter_.reset(new CompactionIterator(
         iter_.get(), cmp_, merge_helper_.get(), last_sequence, &snapshots_,
         kMaxSequenceNumber, Env::Default(), false, range_del_agg_.get(),
-        std::move(compaction), filter, &shutting_down_));
+        std::move(compaction), filter, nullptr, &shutting_down_));
   }
 
   void AddSnapshot(SequenceNumber snapshot) { snapshots_.push_back(snapshot); }

@@ -1,7 +1,7 @@
 // Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-// This source code is licensed under the BSD-style license found in the
-// LICENSE file in the root directory of this source tree. An additional grant
-// of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 
 #ifndef STORAGE_ROCKSDB_INCLUDE_PERF_CONTEXT_H
 #define STORAGE_ROCKSDB_INCLUDE_PERF_CONTEXT_H
@@ -125,15 +125,34 @@ struct PerfContext {
   uint64_t bloom_sst_hit_count;
   // total number of SST table bloom misses
   uint64_t bloom_sst_miss_count;
+
+  // Total time spent in Env filesystem operations. These are only populated
+  // when TimedEnv is used.
+  uint64_t env_new_sequential_file_nanos;
+  uint64_t env_new_random_access_file_nanos;
+  uint64_t env_new_writable_file_nanos;
+  uint64_t env_reuse_writable_file_nanos;
+  uint64_t env_new_random_rw_file_nanos;
+  uint64_t env_new_directory_nanos;
+  uint64_t env_file_exists_nanos;
+  uint64_t env_get_children_nanos;
+  uint64_t env_get_children_file_attributes_nanos;
+  uint64_t env_delete_file_nanos;
+  uint64_t env_create_dir_nanos;
+  uint64_t env_create_dir_if_missing_nanos;
+  uint64_t env_delete_dir_nanos;
+  uint64_t env_get_file_size_nanos;
+  uint64_t env_get_file_modification_time_nanos;
+  uint64_t env_rename_file_nanos;
+  uint64_t env_link_file_nanos;
+  uint64_t env_lock_file_nanos;
+  uint64_t env_unlock_file_nanos;
+  uint64_t env_new_logger_nanos;
 };
 
-#if defined(NPERF_CONTEXT) || defined(IOS_CROSS_COMPILE)
-extern PerfContext perf_context;
-#elif _WIN32
-extern __declspec(thread) PerfContext perf_context;
-#else
-extern __thread PerfContext perf_context;
-#endif
+// Get Thread-local PerfContext object pointer
+// if defined(NPERF_CONTEXT), then the pointer is not thread-local
+PerfContext* get_perf_context();
 
 }
 

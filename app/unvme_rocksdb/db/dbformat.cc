@@ -1,7 +1,7 @@
 //  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-//  This source code is licensed under the BSD-style license found in the
-//  LICENSE file in the root directory of this source tree. An additional grant
-//  of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 //
 // Copyright (c) 2011 The LevelDB Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -14,9 +14,10 @@
 
 #include <inttypes.h>
 #include <stdio.h>
+#include "monitoring/perf_context_imp.h"
 #include "port/port.h"
 #include "util/coding.h"
-#include "util/perf_context_imp.h"
+#include "util/string_util.h"
 
 namespace rocksdb {
 
@@ -55,7 +56,7 @@ void AppendInternalKeyFooter(std::string* result, SequenceNumber s,
 
 std::string ParsedInternalKey::DebugString(bool hex) const {
   char buf[50];
-  snprintf(buf, sizeof(buf), "' @ %" PRIu64 ": %d", sequence,
+  snprintf(buf, sizeof(buf), "' seq:%" PRIu64 ", type:%d", sequence,
            static_cast<int>(type));
   std::string result = "'";
   result += user_key.ToString(hex);
@@ -128,7 +129,7 @@ void InternalKeyComparator::FindShortestSeparator(
   Slice user_limit = ExtractUserKey(limit);
   std::string tmp(user_start.data(), user_start.size());
   user_comparator_->FindShortestSeparator(&tmp, user_limit);
-  if (tmp.size() < user_start.size() &&
+  if (tmp.size() <= user_start.size() &&
       user_comparator_->Compare(user_start, tmp) < 0) {
     // User key has become shorter physically, but larger logically.
     // Tack on the earliest possible number to the shortened user key.
@@ -143,7 +144,7 @@ void InternalKeyComparator::FindShortSuccessor(std::string* key) const {
   Slice user_key = ExtractUserKey(*key);
   std::string tmp(user_key.data(), user_key.size());
   user_comparator_->FindShortSuccessor(&tmp);
-  if (tmp.size() < user_key.size() &&
+  if (tmp.size() <= user_key.size() &&
       user_comparator_->Compare(user_key, tmp) < 0) {
     // User key has become shorter physically, but larger logically.
     // Tack on the earliest possible number to the shortened user key.

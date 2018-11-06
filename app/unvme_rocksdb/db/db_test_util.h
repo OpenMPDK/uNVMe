@@ -1,7 +1,7 @@
 // Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-// This source code is licensed under the BSD-style license found in the
-// LICENSE file in the root directory of this source tree. An additional grant
-// of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 //
 // Copyright (c) 2011 The LevelDB Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -14,9 +14,6 @@
 
 #include <fcntl.h>
 #include <inttypes.h>
-#ifndef OS_WIN
-#include <unistd.h>
-#endif
 
 #include <algorithm>
 #include <map>
@@ -29,7 +26,7 @@
 
 #include "db/db_impl.h"
 #include "db/dbformat.h"
-#include "db/filename.h"
+#include "env/mock_env.h"
 #include "memtable/hash_linklist_rep.h"
 #include "rocksdb/cache.h"
 #include "rocksdb/compaction_filter.h"
@@ -48,14 +45,11 @@
 #include "table/plain_table_factory.h"
 #include "table/scoped_arena_iterator.h"
 #include "util/compression.h"
-#include "util/mock_env.h"
+#include "util/filename.h"
 #include "util/mutexlock.h"
 
 #include "util/string_util.h"
-// SyncPoint is not supported in Released Windows Mode.
-#if !(defined NDEBUG) || !defined(OS_WIN)
 #include "util/sync_point.h"
-#endif  // !(defined NDEBUG) || !defined(OS_WIN)
 #include "util/testharness.h"
 #include "util/testutil.h"
 #include "utilities/merge_operators.h"
@@ -112,6 +106,11 @@ class AtomicCounter {
 
 struct OptionsOverride {
   std::shared_ptr<const FilterPolicy> filter_policy = nullptr;
+  // These will be used only if filter_policy is set
+  bool partition_filters = false;
+  uint64_t metadata_block_size = 1024;
+  BlockBasedTableOptions::IndexType index_type =
+      BlockBasedTableOptions::IndexType::kBinarySearch;
 
   // Used as a bit mask of individual enums in which to skip an XF test point
   int skip_policy = 0;
@@ -124,8 +123,8 @@ enum SkipPolicy { kSkipNone = 0, kSkipNoSnapshot = 1, kSkipNoPrefix = 2 };
 // A hacky skip list mem table that triggers flush after number of entries.
 class SpecialMemTableRep : public MemTableRep {
  public:
-  explicit SpecialMemTableRep(MemTableAllocator* allocator,
-                              MemTableRep* memtable, int num_entries_flush)
+  explicit SpecialMemTableRep(Allocator* allocator, MemTableRep* memtable,
+                              int num_entries_flush)
       : MemTableRep(allocator),
         memtable_(memtable),
         num_entries_flush_(num_entries_flush),
@@ -185,8 +184,9 @@ class SpecialSkipListFactory : public MemTableRepFactory {
   explicit SpecialSkipListFactory(int num_entries_flush)
       : num_entries_flush_(num_entries_flush) {}
 
+  using MemTableRepFactory::CreateMemTableRep;
   virtual MemTableRep* CreateMemTableRep(
-      const MemTableRep::KeyComparator& compare, MemTableAllocator* allocator,
+      const MemTableRep::KeyComparator& compare, Allocator* allocator,
       const SliceTransform* transform, Logger* logger) override {
     return new SpecialMemTableRep(
         allocator, factory_.CreateMemTableRep(compare, allocator, transform, 0),
@@ -274,6 +274,9 @@ class SpecialEnv : public EnvWrapper {
       }
       bool use_direct_io() const override {
         return base_->use_direct_io();
+      }
+      Status Allocate(uint64_t offset, uint64_t len) override {
+        return base_->Allocate(offset, len);
       }
     };
     class ManifestFile : public WritableFile {
@@ -581,10 +584,32 @@ class OnFileDeletionListener : public EventListener {
 };
 #endif
 
+// A test merge operator mimics put but also fails if one of merge operands is
+// "corrupted".
+class TestPutOperator : public MergeOperator {
+ public:
+  virtual bool FullMergeV2(const MergeOperationInput& merge_in,
+                           MergeOperationOutput* merge_out) const override {
+    if (merge_in.existing_value != nullptr &&
+        *(merge_in.existing_value) == "corrupted") {
+      return false;
+    }
+    for (auto value : merge_in.operand_list) {
+      if (value == "corrupted") {
+        return false;
+      }
+    }
+    merge_out->existing_operand = merge_in.operand_list.back();
+    return true;
+  }
+
+  virtual const char* Name() const override { return "TestPutOperator"; }
+};
+
 class DBTestBase : public testing::Test {
- protected:
+ public:
   // Sequence of option configurations to try
-  enum OptionConfig {
+  enum OptionConfig : int {
     kDefault = 0,
     kBlockBasedTableWithPrefixHashIndex = 1,
     kBlockBasedTableWithWholeKeyHashIndex = 2,
@@ -615,13 +640,15 @@ class DBTestBase : public testing::Test {
     kRowCache = 27,
     kRecycleLogFiles = 28,
     kConcurrentSkipList = 29,
-    kEnd = 30,
-    kLevelSubcompactions = 31,
-    kUniversalSubcompactions = 32,
-    kBlockBasedTableWithIndexRestartInterval = 33,
-    kBlockBasedTableWithPartitionedIndex = 34,
+    kPipelinedWrite = 30,
+    kEnd = 31,
+    kDirectIO = 32,
+    kLevelSubcompactions = 33,
+    kUniversalSubcompactions = 34,
+    kBlockBasedTableWithIndexRestartInterval = 35,
+    kBlockBasedTableWithPartitionedIndex = 36,
+    kPartitionedFilterWithNewTableReaderForCompactions = 37,
   };
-  int option_config_;
 
  public:
   std::string dbname_;
@@ -632,6 +659,7 @@ class DBTestBase : public testing::Test {
   DB* db_;
   std::vector<ColumnFamilyHandle*> handles_;
 
+  int option_config_;
   Options last_options_;
 
   // Skip some options, as they may not be applicable to a specific test.
@@ -682,12 +710,19 @@ class DBTestBase : public testing::Test {
   bool ChangeFilterOptions();
 
   // Return the current option configuration.
-  Options CurrentOptions(
-      const anon::OptionsOverride& options_override = anon::OptionsOverride());
+  Options CurrentOptions(const anon::OptionsOverride& options_override =
+                             anon::OptionsOverride()) const;
 
-  Options CurrentOptions(
-      const Options& defaultOptions,
-      const anon::OptionsOverride& options_override = anon::OptionsOverride());
+  Options CurrentOptions(const Options& default_options,
+                         const anon::OptionsOverride& options_override =
+                             anon::OptionsOverride()) const;
+
+  static Options GetDefaultOptions();
+
+  Options GetOptions(int option_config,
+                     const Options& default_options = GetDefaultOptions(),
+                     const anon::OptionsOverride& options_override =
+                         anon::OptionsOverride()) const;
 
   DBImpl* dbfull() { return reinterpret_cast<DBImpl*>(db_); }
 

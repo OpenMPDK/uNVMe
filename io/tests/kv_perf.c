@@ -278,8 +278,8 @@ void kv_callback_fn(kv_pair *kv, unsigned int result, unsigned int status) {
 	}\
 }
 
-int (*kv_nvme_store)(uint64_t handle, int, const kv_pair* kv);
-int (*kv_nvme_store_async)(uint64_t handle, int, const kv_pair* kv);
+int (*kv_nvme_store)(uint64_t handle, int, kv_pair* kv);
+int (*kv_nvme_store_async)(uint64_t handle, int, kv_pair* kv);
 int (*kv_nvme_retrieve)(uint64_t handle, int, kv_pair* kv);
 int (*kv_nvme_retrieve_async)(uint64_t handle, int, kv_pair* kv);
 
@@ -324,6 +324,10 @@ void delete_test_data(unsigned int device, unsigned int thread_index)
 	}
 
 	return;
+}
+
+uint64_t create_test_key(unsigned int thread_index, unsigned int id){
+	return (thread_index * 100000000UL) + id;
 }
 
 int create_test_data(unsigned int device, unsigned int thread_index, unsigned int seed)
@@ -392,7 +396,11 @@ int create_test_data(unsigned int device, unsigned int thread_index, unsigned in
 			kv->pair.keyspace_id = KV_KEYSPACE_IODATA;
 			kv->pair.key.length = g_opt.key_size;
 			if (g_low_cmd_mode ) {
-				kv->pair.key.key = kv_zalloc(kv->pair.key.length);
+				int key_buffer_size = kv->pair.key.length;
+				if(kv->pair.key.length%4){
+					key_buffer_size += (4-kv->pair.key.length%4);
+				}
+				kv->pair.key.key = kv_zalloc(key_buffer_size);
 			} else {
 				kv->pair.key.key = malloc(kv->pair.key.length);
 			}
@@ -413,7 +421,8 @@ int create_test_data(unsigned int device, unsigned int thread_index, unsigned in
 				if(sdk_opt.ssd_type == LBA_TYPE_SSD) {
 					*(uint64_t*)(kv->pair.key.key) = id;
 				} else {
-					snprintf(kv->pair.key.key, kv->pair.key.length+1, "%02d%03d%011u", device, thread_index, id);
+					uint64_t _key = create_test_key(thread_index, id);
+					memcpy(kv->pair.key.key, &_key, MIN((size_t)g_opt.key_size, sizeof(uint64_t)));
 				}
 				value_idx = id;
 			} else if (g_opt.key_dist[blend_idx] == RAND_RANGE) {
@@ -425,7 +434,8 @@ int create_test_data(unsigned int device, unsigned int thread_index, unsigned in
 				if(sdk_opt.ssd_type == LBA_TYPE_SSD) {
 					*(uint64_t*)(kv->pair.key.key) = count;
 				} else {
-					snprintf(kv->pair.key.key, kv->pair.key.length+1, "%02d%03d%011u", device, thread_index, count);
+					uint64_t _key = create_test_key(thread_index, count);
+					memcpy(kv->pair.key.key, &_key, MIN((size_t)g_opt.key_size, sizeof(uint64_t)));
 				}
 				value_idx = count;
 			}
@@ -447,7 +457,11 @@ int create_test_data(unsigned int device, unsigned int thread_index, unsigned in
 			}
 
 			if (g_low_cmd_mode) {
-				kv->pair.value.value = kv_zalloc(kv->pair.value.length);
+				int value_buffer_size = kv->pair.value.length;
+				if(value_buffer_size%4){
+					value_buffer_size += (4-kv->pair.value.length%4);
+				}
+				kv->pair.value.value = kv_zalloc(value_buffer_size);
 			} else {
 				kv->pair.value.value = malloc(kv->pair.value.length);
 			}
@@ -459,6 +473,7 @@ int create_test_data(unsigned int device, unsigned int thread_index, unsigned in
 			}
 
 			kv->pair.value.offset = 0;
+			kv->pair.value.actual_value_size = 0;
 
 			if (g_opt.verify) {
 				if (read(fd, kv->pair.value.value, kv->pair.value.length) !=  kv->pair.value.length){
@@ -528,7 +543,8 @@ int create_test_data(unsigned int device, unsigned int thread_index, unsigned in
 				if (sdk_opt.ssd_type == LBA_TYPE_SSD) {
 					*(uint64_t *)kv->pair.key.key = MAX(g_private_data[device][thread_index].keys[blend_idx][cnt] * (kv->pair.value.length / SECTOR_SIZE), MAX_KEY_RANGE_LBA);
 				} else {
-					snprintf(kv->pair.key.key, kv->pair.key.length+1, "%02d%03d%011u", device, thread_index, (unsigned int)g_private_data[device][thread_index].keys[blend_idx][cnt]);
+					uint64_t _key = create_test_key(thread_index, (unsigned int)g_private_data[device][thread_index].keys[blend_idx][cnt]);
+					memcpy(kv->pair.key.key, &_key, MIN((size_t)g_opt.key_size, sizeof(uint64_t)));
 				}
 				cnt++;
 			}
@@ -734,7 +750,7 @@ void show_kv_perf_menu(){
                "\t--seed | -g <seed_value>, Seeds for generating random key (this option can be set with multiple values), default: 0\n"
                "\t--def_value | -k <key_value>, 8 bytes value string. This is filled upto the value size(e.g.DEADBEEF), default: NULL\n"
                "\t--read_file | -f <File Name>, Name of the file to read the Key Value(e.g.\"/home/guest/key_value.txt\"), default: NULL\n"
-               "\t--key_range | -y <key_start-key_end>, -y <s-e> <s-e> <s-e> for blent test, workload type should be 3(-p 3), default: NULL\n"
+               "\t--key_range | -y <key_start-key_end>, -y <s-e> <s-e> <s-e> for blend test, workload type should be 3(-p 3), default: NULL\n"
                "\t--use_sdk_cmd | -L, Use SDK level IO cmds. If this options is not set, use low level IO cmds\n"
 	       "\t--help | -h, Showing command menu\n");
 }

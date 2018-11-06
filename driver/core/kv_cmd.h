@@ -34,8 +34,8 @@
 #ifndef _KVCMD_H_
 #define _KVCMD_H_
 
-int _kv_nvme_store(kv_nvme_t *nvme, const kv_pair *kv, int qid, uint8_t is_store);
-int _kv_nvme_store_async(kv_nvme_t *nvme, const kv_pair *kv, int qid);
+int _kv_nvme_store(kv_nvme_t *nvme, kv_pair *kv, int qid, uint8_t is_store);
+int _kv_nvme_store_async(kv_nvme_t *nvme, kv_pair *kv, int qid);
 int _kv_nvme_retrieve(kv_nvme_t *nvme, kv_pair *kv, int qid);
 int _kv_nvme_retrieve_async(kv_nvme_t *nvme, kv_pair *kv, int qid);
 int _kv_nvme_delete(kv_nvme_t *nvme, const kv_pair *kv, int qid);

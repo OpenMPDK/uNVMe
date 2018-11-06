@@ -1,7 +1,7 @@
 //  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-//  This source code is licensed under the BSD-style license found in the
-//  LICENSE file in the root directory of this source tree. An additional grant
-//  of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 //
 // Copyright (c) 2011 The LevelDB Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -16,18 +16,17 @@
 #include <unordered_map>
 #include <vector>
 #include "db/dbformat.h"
-#include "db/memtable_allocator.h"
 #include "db/range_del_aggregator.h"
-#include "db/skiplist.h"
 #include "db/version_edit.h"
+#include "monitoring/instrumented_mutex.h"
+#include "options/cf_options.h"
 #include "rocksdb/db.h"
 #include "rocksdb/env.h"
 #include "rocksdb/memtablerep.h"
-#include "util/cf_options.h"
+#include "util/allocator.h"
 #include "util/concurrent_arena.h"
 #include "util/dynamic_bloom.h"
 #include "util/hash.h"
-#include "util/instrumented_mutex.h"
 
 namespace rocksdb {
 
@@ -102,7 +101,7 @@ class MemTable {
                     const ImmutableCFOptions& ioptions,
                     const MutableCFOptions& mutable_cf_options,
                     WriteBufferManager* write_buffer_manager,
-                    SequenceNumber earliest_seq);
+                    SequenceNumber earliest_seq, uint32_t column_family_id);
 
   // Do not delete this MemTable unless Unref() indicates it not in use.
   ~MemTable();
@@ -286,6 +285,12 @@ class MemTable {
     return earliest_seqno_.load(std::memory_order_relaxed);
   }
 
+  // DB's latest sequence ID when the memtable is created. This number
+  // may be updated to a more recent one before any key is inserted.
+  SequenceNumber GetCreationSeq() const { return creation_seq_; }
+
+  void SetCreationSeq(SequenceNumber sn) { creation_seq_ = sn; }
+
   // Returns the next active logfile number when this memtable is about to
   // be flushed to storage
   // REQUIRES: external synchronization to prevent simultaneous
@@ -312,7 +317,7 @@ class MemTable {
   // write anything to this MemTable().  (Ie. do not call Add() or Update()).
   void MarkImmutable() {
     table_->MarkReadOnly();
-    allocator_.DoneAllocating();
+    mem_tracker_.DoneAllocating();
   }
 
   // return true if the current MemTableRep supports merge operator.
@@ -354,8 +359,8 @@ class MemTable {
   const MemTableOptions moptions_;
   int refs_;
   const size_t kArenaBlockSize;
+  AllocTracker mem_tracker_;
   ConcurrentArena arena_;
-  MemTableAllocator allocator_;
   unique_ptr<MemTableRep> table_;
   unique_ptr<MemTableRep> range_del_table_;
   bool is_range_del_table_empty_;
@@ -380,6 +385,8 @@ class MemTable {
   // The db sequence number at the time of creation or kMaxSequenceNumber
   // if not set.
   std::atomic<SequenceNumber> earliest_seqno_;
+
+  SequenceNumber creation_seq_;
 
   // The log files earlier than this number can be deleted.
   uint64_t mem_next_logfile_number_;

@@ -8229,7 +8229,7 @@ FilePath FilePath::RemoveExtension(const char* extension) const {
   return *this;
 }
 
-// Returns a pointer to the last occurence of a valid path separator in
+// Returns a pointer to the last occurrence of a valid path separator in
 // the FilePath. On Windows, for example, both '/' and '\' are valid path
 // separators. Returns NULL if no path separator was found.
 const char* FilePath::FindLastPathSeparator() const {
@@ -8676,8 +8676,8 @@ void Notification::WaitForNotification() {
 }
 
 Mutex::Mutex()
-    : type_(kDynamic),
-      owner_thread_id_(0),
+    : owner_thread_id_(0),
+      type_(kDynamic),
       critical_section_init_phase_(0),
       critical_section_(new CRITICAL_SECTION) {
   ::InitializeCriticalSection(critical_section_);

@@ -68,7 +68,7 @@ void udd_write_cb(kv_pair *kv, unsigned int result, unsigned int status) {
 	write_complete_cnt++;
 	struct time_stamp *stamp = kv->param.private_data;
 	gettimeofday(&stamp->end, NULL);
-//	printf("[%s] complete = %s length=%d\n", __FUNCTION__, (char*)kv->value.value, kv->value.length);
+//	fprintf(stderr,"[%s] complete = %s length=%d\n", __FUNCTION__, (char*)kv->value.value, kv->value.length);
 }
 
 void udd_read_cb(kv_pair *kv, unsigned int result, unsigned int status) {
@@ -80,7 +80,7 @@ void udd_read_cb(kv_pair *kv, unsigned int result, unsigned int status) {
 	read_complete_cnt++;
 	struct time_stamp *stamp = kv->param.private_data;
 	gettimeofday(&stamp->end, NULL);
-//	printf("[%s] complete = %s length=%d\n", __FUNCTION__, (char*)kv->value.value, kv->value.length);
+//	fprintf(stderr,"[%s] complete = %s length=%d\n", __FUNCTION__, (char*)kv->value.value, kv->value.length);
 }
 
 void udd_delete_cb(kv_pair *kv, unsigned int result, unsigned int status) {
@@ -112,7 +112,7 @@ void udd_iterate_cb(kv_iterate *it, unsigned int result, unsigned int status) {
 }
 
 int iterate_async() {
-	printf("%s start\n",__FUNCTION__);
+	fprintf(stderr,"%s start\n",__FUNCTION__);
 
 	int i;
 	int ret = -EINVAL;
@@ -226,13 +226,17 @@ int iterate_async() {
 			Hash128_2_P128(kv[i]->value.value, value_size, seed, hash_value[i]);
 		}
 		//alloc key
-		kv[i]->key.key = malloc(key_length + 1);
+		int key_buffer_size = key_length;
+		if(key_length%4){
+			key_buffer_size += (4-key_length%4);
+		}
+		kv[i]->key.key = kv_zalloc(key_buffer_size);
 		if(!kv[i]->key.key)
 			return -ENOMEM;
 
 		kv[i]->key.length = key_length;
 		if (host_hash == 0) {
-			sprintf(kv[i]->key.key, "%04x%04xmountain",i,i);
+			memcpy(kv[i]->key.key + ((size_t)key_length > sizeof(int) ? (key_length - sizeof(i)) : 0), &i, MIN((size_t)key_length, sizeof(int)));
 		} else {
 			memcpy(kv[i]->key.key, hash_value[i], key_length);
 		}
@@ -308,7 +312,7 @@ int iterate_async() {
 		add_latency_stat(&stat, &stamps[i].start, &stamps[i].end);
 	}
 	show_elapsed_time(&start,&end, "kv_nvme_write_async", insert_count, value_size, &stat);
-	printf("Received Write Submit Count: %d, Write Complete Count: %d\n", write_submit_cnt, write_complete_cnt);
+	fprintf(stderr,"Received Write Submit Count: %d, Write Complete Count: %d\n", write_submit_cnt, write_complete_cnt);
 
 	//Prepare reading
 	for(i = 0; i < insert_count; i++){
@@ -326,7 +330,7 @@ int iterate_async() {
 			fprintf(stderr, "%d ", i);
 		}
 
-		//printf("key=%s\n",(char*)key[i]->key);
+		//fprintf(stderr,"key=%s\n",(char*)key[i]->key);
 
 		ret = -EINVAL;
 		while(ret) {
@@ -340,7 +344,7 @@ int iterate_async() {
 				break;
 			}
 		}
-		//printf("value = %s\n", (char*)value[i - 1]->value);
+		//fprintf(stderr,"value = %s\n", (char*)value[i - 1]->value);
 	}
 
 	while(read_complete_cnt < read_submit_cnt) {
@@ -355,7 +359,7 @@ int iterate_async() {
 		add_latency_stat(&stat, &stamps[i].start, &stamps[i].end);
 	}
 	show_elapsed_time(&start,&end, "kv_nvme_read_async", insert_count, value_size, &stat);
-	printf("Received Read Submit Count: %d, Read Complete Count: %d\n", read_submit_cnt, read_complete_cnt);
+	fprintf(stderr,"Received Read Submit Count: %d, Read Complete Count: %d\n", read_submit_cnt, read_complete_cnt);
 
 	if(check_miscompare){
 		for (i = 0; i < insert_count; i++) {
@@ -364,7 +368,7 @@ int iterate_async() {
 			if (memcmp((void*)tmp_hash, (void*)hash_value[i],sizeof(tmp_hash)))
 				miscompare_cnt++;
 		}
-		printf("Miscompare count: %u\n", miscompare_cnt);
+		fprintf(stderr,"Miscompare count: %u\n", miscompare_cnt);
 	}
 
         //check if iterator is already opened, and close it if so.
@@ -372,7 +376,7 @@ int iterate_async() {
         kv_iterate_handle_info info[KV_MAX_ITERATE_HANDLE];
         ret = kv_nvme_iterate_info(handle, info, nr_iterate_handle);
         if(ret == KV_SUCCESS){
-                printf("iterate_handle count=%d\n",nr_iterate_handle);
+                fprintf(stderr,"iterate_handle count=%d\n",nr_iterate_handle);
                 for(i=0;i<nr_iterate_handle;i++){
                         fprintf(stderr, "iterate_handle_info[%d] : info.handle_id=%d info.status=%d info.type=%d info.prefix=%08x info.bitmask=%08x info.is_eof=%d\n",
                                 i+1, info[i].handle_id, info[i].status, info[i].type, info[i].prefix, info[i].bitmask, info[i].is_eof);
@@ -391,13 +395,13 @@ int iterate_async() {
 	memcpy(&prefix,kv[0]->key.key,2);
 	uint32_t iterator = KV_INVALID_ITERATE_HANDLE;
 	uint8_t keyspace_id = KV_KEYSPACE_IODATA;
-	//iterator = kv_nvme_iterate_open(handle, keyspace_id, bitmask, prefix, KV_KEY_ITERATE);
-	iterator = kv_nvme_iterate_open(handle, keyspace_id, bitmask, prefix, KV_KEY_ITERATE_WITH_RETRIEVE);
+	iterator = kv_nvme_iterate_open(handle, keyspace_id, bitmask, prefix, KV_KEY_ITERATE);
+	//iterator = kv_nvme_iterate_open(handle, keyspace_id, bitmask, prefix, KV_KEY_ITERATE_WITH_RETRIEVE); // Note: general kv ssd no longer supports KV_KEY_ITERATE_WITH_RETRIEVE
 	gettimeofday(&end, NULL);
 	fprintf(stderr, "Done\n");
 	show_elapsed_time(&start,&end, "kv_nvme_iterate_open", 1, 0, NULL);
-	if(iterator != KV_INVALID_ITERATE_HANDLE){
-		printf("Iterate_Open Success: iterator id=%d\n", iterator);
+	if(iterator != KV_INVALID_ITERATE_HANDLE && iterator != KV_ERR_ITERATE_ERROR){
+		fprintf(stderr,"Iterate_Open Success: iterator id=%d\n", iterator);
 
 		//Prepare Iterate_Read
 		for(i = 0; i < iterate_count; i++){
@@ -416,7 +420,7 @@ int iterate_async() {
 				fprintf(stderr, "%d ", i);
 			}
 
-			printf("submit iterate_read: %d\n", i);
+			fprintf(stderr,"submit iterate_read: %d\n", i);
 			ret = -EINVAL;
 			while(ret) {
 				gettimeofday(&stamps[i].start, NULL);
@@ -442,7 +446,7 @@ int iterate_async() {
 			add_latency_stat(&stat, &stamps[i].start, &stamps[i].end);
 		}
 		show_elapsed_time(&start,&end, "kv_nvme_iterate_async", iterate_count, it[0]->kv.value.length, &stat);
-		printf("Received Iterate_Read Submit Count: %d, Iterate_Read Complete Count: %d\n", iterate_submit_cnt, iterate_complete_cnt);
+		fprintf(stderr,"Received Iterate_Read Submit Count: %d, Iterate_Read Complete Count: %d\n", iterate_submit_cnt, iterate_complete_cnt);
 
 
 		//NVMe Iterate_Close
@@ -454,7 +458,7 @@ int iterate_async() {
 		show_elapsed_time(&start,&end, "kv_nvme_iterate_close", 1, 0, NULL);
 	}
 	else{
-		printf("Iterate_Open Failure: iterator id=%d\n", iterator);
+		fprintf(stderr,"Iterate_Open Failure: iterator = %d\n", iterator);
 	}
 
 	//Prepare deleting
@@ -484,7 +488,7 @@ int iterate_async() {
 				break;
 			}
 		}
-		//printf("value=%s\n",(char*)value[i]->value);
+		//fprintf(stderr,"value=%s\n",(char*)value[i]->value);
 	}
 	while(delete_complete_cnt < delete_submit_cnt) {
 		usleep(1);
@@ -514,7 +518,7 @@ int iterate_async() {
 			fprintf(stderr, "%d ", i);
 		}
 		if(kv[i]->value.value) kv_free(kv[i]->value.value);
-		if(kv[i]->key.key) free(kv[i]->key.key);
+		if(kv[i]->key.key) kv_free(kv[i]->key.key);
 		if(kv[i]) free(kv[i]);
 	}
 	if(kv) free(kv);
@@ -526,7 +530,7 @@ int iterate_async() {
 
 	waf = kv_nvme_get_waf(handle) / 10;
 	if(waf != KV_ERR_INVALID_VALUE){
-		printf("WAF After doing I/O: %f\n", waf);
+		fprintf(stderr,"WAF After doing I/O: %f\n", waf);
 	}
 
 	//Init Cache

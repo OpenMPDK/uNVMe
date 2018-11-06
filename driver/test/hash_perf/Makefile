@@ -1,14 +1,14 @@
 ifeq ($(KV_DIR),)
-export KV_DIR = $(shell pwd)/../../
+export KV_DIR = $(shell pwd)/../../../
 endif
 
-include $(KV_DIR)/mk/kv.dd.mk
+include $(KV_DIR)/mk/unvme.mk
 
-C_SRCS := hash_perf.c $(COMMON_PATH)/EagleHashIP.c
+C_SRCS := hash_perf.c $(COMMON_INCLUDE)/EagleHashIP.c
 
 LIBS += $(KV_DD_LIB) $(KV_LIBS)
 
-CFLAGS = -O0 -march=native -m64 -D_GNU_SOURCE -I../../include -I$(COMMON_PATH) -std=gnu99
+CFLAGS = -O0 -march=native -m64 -D_GNU_SOURCE -I../../include -I$(COMMON_INCLUDE) -std=gnu99
 
 APP = hash_perf
 

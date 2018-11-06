@@ -65,7 +65,7 @@ K=1024
 M=$((1024 * K))
 G=$((1024 * M))
 
-num_keys=${NKEYS:-$((1 * G))}
+num_keys=${NKEYS:-$((100 * M))}
 # write rate for readwhile... tests
 bg_mbwps=${BG_MBWRITEPERSEC:-4}
 # write rate for tests other than readwhile, 0 means no limit
@@ -102,7 +102,7 @@ if [[ $skip_low_pri_tests == 1 ]]; then
   echo "Skipping some non-critical tests because SKIP_LOW_PRI_TESTS is set."
 fi
 
-output_dir="/tmp/output"
+output_dir="${TMPDIR:-/tmp}/output"
 
 ARGS="\
 OUTPUT_DIR=$output_dir \

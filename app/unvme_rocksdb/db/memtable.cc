@@ -1,7 +1,7 @@
 //  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-//  This source code is licensed under the BSD-style license found in the
-//  LICENSE file in the root directory of this source tree. An additional grant
-//  of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 //
 // Copyright (c) 2011 The LevelDB Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -11,12 +11,13 @@
 
 #include <memory>
 #include <algorithm>
-#include <limits>
 
 #include "db/dbformat.h"
 #include "db/merge_context.h"
 #include "db/merge_helper.h"
 #include "db/pinned_iterators_manager.h"
+#include "monitoring/perf_context_imp.h"
+#include "monitoring/statistics.h"
 #include "port/port.h"
 #include "rocksdb/comparator.h"
 #include "rocksdb/env.h"
@@ -33,9 +34,6 @@
 #include "util/memory_usage.h"
 #include "util/murmurhash.h"
 #include "util/mutexlock.h"
-#include "util/perf_context_imp.h"
-#include "util/statistics.h"
-#include "util/stop_watch.h"
 
 namespace rocksdb {
 
@@ -61,20 +59,24 @@ MemTable::MemTable(const InternalKeyComparator& cmp,
                    const ImmutableCFOptions& ioptions,
                    const MutableCFOptions& mutable_cf_options,
                    WriteBufferManager* write_buffer_manager,
-                   SequenceNumber earliest_seq)
+                   SequenceNumber latest_seq, uint32_t column_family_id)
     : comparator_(cmp),
       moptions_(ioptions, mutable_cf_options),
       refs_(0),
       kArenaBlockSize(OptimizeBlockSize(moptions_.arena_block_size)),
-      arena_(moptions_.arena_block_size,
-             mutable_cf_options.memtable_huge_page_size),
-      allocator_(&arena_, write_buffer_manager),
+      mem_tracker_(write_buffer_manager),
+      arena_(
+          moptions_.arena_block_size,
+          (write_buffer_manager != nullptr && write_buffer_manager->enabled())
+              ? &mem_tracker_
+              : nullptr,
+          mutable_cf_options.memtable_huge_page_size),
       table_(ioptions.memtable_factory->CreateMemTableRep(
-          comparator_, &allocator_, ioptions.prefix_extractor,
-          ioptions.info_log)),
+          comparator_, &arena_, ioptions.prefix_extractor, ioptions.info_log,
+          column_family_id)),
       range_del_table_(SkipListFactory().CreateMemTableRep(
-          comparator_, &allocator_, nullptr /* transform */,
-          ioptions.info_log)),
+          comparator_, &arena_, nullptr /* transform */, ioptions.info_log,
+          column_family_id)),
       is_range_del_table_empty_(true),
       data_size_(0),
       num_entries_(0),
@@ -83,7 +85,8 @@ MemTable::MemTable(const InternalKeyComparator& cmp,
       flush_completed_(false),
       file_number_(0),
       first_seqno_(0),
-      earliest_seqno_(earliest_seq),
+      earliest_seqno_(latest_seq),
+      creation_seq_(latest_seq),
       mem_next_logfile_number_(0),
       min_prep_log_referenced_(0),
       locks_(moptions_.inplace_update_support
@@ -100,13 +103,16 @@ MemTable::MemTable(const InternalKeyComparator& cmp,
 
   if (prefix_extractor_ && moptions_.memtable_prefix_bloom_bits > 0) {
     prefix_bloom_.reset(new DynamicBloom(
-        &allocator_, moptions_.memtable_prefix_bloom_bits,
-        ioptions.bloom_locality, 6 /* hard coded 6 probes */, nullptr,
-        moptions_.memtable_huge_page_size, ioptions.info_log));
+        &arena_, moptions_.memtable_prefix_bloom_bits, ioptions.bloom_locality,
+        6 /* hard coded 6 probes */, nullptr, moptions_.memtable_huge_page_size,
+        ioptions.info_log));
   }
 }
 
-MemTable::~MemTable() { assert(refs_ == 0); }
+MemTable::~MemTable() {
+  mem_tracker_.FreeMem();
+  assert(refs_ == 0);
+}
 
 size_t MemTable::ApproximateMemoryUsage() {
   autovector<size_t> usages = {arena_.ApproximateMemoryUsage(),
@@ -575,7 +581,7 @@ static bool SaveValue(void* arg, const char* entry) {
           *(s->status) = MergeHelper::TimedFullMerge(
               merge_operator, s->key->user_key(), &v,
               merge_context->GetOperands(), s->value, s->logger, s->statistics,
-              s->env_);
+              s->env_, nullptr /* result_operand */, true);
         } else if (s->value != nullptr) {
           s->value->assign(v.data(), v.size());
         }
@@ -592,7 +598,7 @@ static bool SaveValue(void* arg, const char* entry) {
           *(s->status) = MergeHelper::TimedFullMerge(
               merge_operator, s->key->user_key(), nullptr,
               merge_context->GetOperands(), s->value, s->logger, s->statistics,
-              s->env_);
+              s->env_, nullptr /* result_operand */, true);
         } else {
           *(s->status) = Status::NotFound();
         }
@@ -723,9 +729,9 @@ void MemTable::Update(SequenceNumber seq,
         uint32_t new_size = static_cast<uint32_t>(value.size());
 
         // Update value, if new value size  <= previous value size
-        if (new_size <= prev_size ) {
-          char* p = EncodeVarint32(const_cast<char*>(key_ptr) + key_length,
-                                   new_size);
+        if (new_size <= prev_size) {
+          char* p =
+              EncodeVarint32(const_cast<char*>(key_ptr) + key_length, new_size);
           WriteLock wl(GetLock(lkey.user_key()));
           memcpy(p, value.data(), value.size());
           assert((unsigned)((p + value.size()) - entry) ==

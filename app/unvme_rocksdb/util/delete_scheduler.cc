@@ -1,7 +1,7 @@
 //  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-//  This source code is licensed under the BSD-style license found in the
-//  LICENSE file in the root directory of this source tree. An additional grant
-//  of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 
 #ifndef ROCKSDB_LITE
 
@@ -12,8 +12,9 @@
 
 #include "port/port.h"
 #include "rocksdb/env.h"
-#include "util/sst_file_manager_impl.h"
+#include "util/logging.h"
 #include "util/mutexlock.h"
+#include "util/sst_file_manager_impl.h"
 #include "util/sync_point.h"
 
 namespace rocksdb {
@@ -60,9 +61,8 @@ Status DeleteScheduler::DeleteFile(const std::string& file_path) {
   std::string path_in_trash;
   s = MoveToTrash(file_path, &path_in_trash);
   if (!s.ok()) {
-    Log(InfoLogLevel::ERROR_LEVEL, info_log_,
-        "Failed to move %s to trash directory (%s)", file_path.c_str(),
-        trash_dir_.c_str());
+    ROCKS_LOG_ERROR(info_log_, "Failed to move %s to trash directory (%s)",
+                    file_path.c_str(), trash_dir_.c_str());
     s = env_->DeleteFile(file_path);
     if (s.ok() && sst_file_manager_) {
       sst_file_manager_->OnDeleteFile(file_path);
@@ -203,9 +203,8 @@ Status DeleteScheduler::DeleteTrashFile(const std::string& path_in_trash,
 
   if (!s.ok()) {
     // Error while getting file size or while deleting
-    Log(InfoLogLevel::ERROR_LEVEL, info_log_,
-        "Failed to delete %s from trash -- %s", path_in_trash.c_str(),
-        s.ToString().c_str());
+    ROCKS_LOG_ERROR(info_log_, "Failed to delete %s from trash -- %s",
+                    path_in_trash.c_str(), s.ToString().c_str());
     *deleted_bytes = 0;
   } else {
     *deleted_bytes = file_size;
