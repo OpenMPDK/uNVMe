@@ -630,8 +630,8 @@ uint32_t _kv_nvme_iterate_open(kv_nvme_t *nvme, const uint8_t keyspace_id, const
 
         KVNVME_DEBUG("Result of the I/O: %d, Status of the I/O: %d", io_sequence.result, io_sequence.status);
 
-        //NOTE : the first byte of cdw0(io_sequence.result) implies iterator id, which should be 1
-        iterator = (io_sequence.result & 0xFF);
+        //NOTE : in normal case, the first byte of cdw0(io_sequence.result) implies iterator id, which should be 1~16
+	iterator = (io_sequence.status) ? io_sequence.status : (io_sequence.result & 0xFF);
         LEAVE();
         return iterator;
 

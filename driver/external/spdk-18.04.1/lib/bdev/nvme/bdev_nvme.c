@@ -706,6 +706,7 @@ static const struct spdk_bdev_fn_table nvmelib_fn_table = {
 	.submit_request		= bdev_nvme_submit_request,
 	.io_type_supported	= bdev_nvme_io_type_supported,
 	.get_io_channel		= bdev_nvme_get_io_channel,
+	.get_io_channel_mq	= NULL,
 	.dump_info_json		= bdev_nvme_dump_info_json,
 	.write_config_json	= bdev_nvme_write_config_json,
 	.get_spin_time		= bdev_nvme_get_spin_time,

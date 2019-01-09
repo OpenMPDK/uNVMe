@@ -82,6 +82,7 @@ struct spdk_bdev_mgr {
 	bool init_complete;
 	bool module_init_complete;
 
+	pthread_spinlock_t lock;
 #ifdef SPDK_CONFIG_VTUNE
 	__itt_domain	*domain;
 #endif
@@ -111,7 +112,7 @@ struct spdk_bdev_mgmt_channel {
 	 *  benefit from a per-thread bdev_io cache.  Without
 	 *  this, non-DPDK threads fetching from the mempool
 	 *  incur a cmpxchg on get and put.
-	 */
+        */
 	bdev_io_stailq_t per_thread_cache;
 	uint32_t	per_thread_cache_count;
 };
@@ -170,6 +171,7 @@ struct spdk_bdev_channel {
 
 	uint32_t		flags;
 
+	pthread_spinlock_t	lock;
 #ifdef SPDK_CONFIG_VTUNE
 	uint64_t		start_tsc;
 	uint64_t		interval_tsc;
@@ -190,6 +192,24 @@ struct spdk_bdev_desc {
 #define __bdev_from_io_dev(io_dev)	((struct spdk_bdev *)(((char *)io_dev) - 1))
 
 static void spdk_bdev_write_zeroes_split(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg);
+
+static void*
+spdk_mempool_safe_get(struct spdk_mempool *mp)
+{
+	void* ret;
+	pthread_spin_lock(&g_bdev_mgr.lock);
+	ret = spdk_mempool_get(mp);
+	pthread_spin_unlock(&g_bdev_mgr.lock);
+	return ret;
+}
+
+static void
+spdk_mempool_safe_put(struct spdk_mempool *mp, void *ele)
+{
+	pthread_spin_lock(&g_bdev_mgr.lock);
+	spdk_mempool_put(mp, ele);
+	pthread_spin_unlock(&g_bdev_mgr.lock);
+}
 
 struct spdk_bdev *
 spdk_bdev_first(void)
@@ -309,6 +329,7 @@ spdk_bdev_io_put_buf(struct spdk_bdev_io *bdev_io)
 	buf = bdev_io->buf;
 	ch = bdev_io->ch->module_ch->mgmt_ch;
 
+	pthread_spin_lock(&bdev_io->ch->lock);
 	if (bdev_io->buf_len <= SPDK_BDEV_SMALL_BUF_MAX_SIZE) {
 		pool = g_bdev_mgr.buf_small_pool;
 		stailq = &ch->need_buf_small;
@@ -318,12 +339,13 @@ spdk_bdev_io_put_buf(struct spdk_bdev_io *bdev_io)
 	}
 
 	if (STAILQ_EMPTY(stailq)) {
-		spdk_mempool_put(pool, buf);
+		spdk_mempool_safe_put(pool, buf);
 	} else {
 		tmp = STAILQ_FIRST(stailq);
 		STAILQ_REMOVE_HEAD(stailq, buf_link);
 		spdk_bdev_io_set_buf(tmp, buf);
 	}
+	pthread_spin_unlock(&bdev_io->ch->lock);
 }
 
 void
@@ -346,6 +368,7 @@ spdk_bdev_io_get_buf(struct spdk_bdev_io *bdev_io, spdk_bdev_io_get_buf_cb cb, u
 	assert(len <= SPDK_BDEV_LARGE_BUF_MAX_SIZE);
 	mgmt_ch = bdev_io->ch->module_ch->mgmt_ch;
 
+	pthread_spin_lock(&bdev_io->ch->lock);
 	bdev_io->buf_len = len;
 	bdev_io->get_buf_cb = cb;
 	if (len <= SPDK_BDEV_SMALL_BUF_MAX_SIZE) {
@@ -356,13 +379,14 @@ spdk_bdev_io_get_buf(struct spdk_bdev_io *bdev_io, spdk_bdev_io_get_buf_cb cb, u
 		stailq = &mgmt_ch->need_buf_large;
 	}
 
-	buf = spdk_mempool_get(pool);
+	buf = spdk_mempool_safe_get(pool);
 
 	if (!buf) {
 		STAILQ_INSERT_TAIL(stailq, bdev_io, buf_link);
 	} else {
 		spdk_bdev_io_set_buf(bdev_io, buf);
 	}
+	pthread_spin_unlock(&bdev_io->ch->lock);
 }
 
 static int
@@ -443,7 +467,7 @@ spdk_bdev_mgmt_channel_destroy(void *io_device, void *ctx_buf)
 		bdev_io = STAILQ_FIRST(&ch->per_thread_cache);
 		STAILQ_REMOVE_HEAD(&ch->per_thread_cache, buf_link);
 		ch->per_thread_cache_count--;
-		spdk_mempool_put(g_bdev_mgr.bdev_io_pool, (void *)bdev_io);
+		spdk_mempool_safe_put(g_bdev_mgr.bdev_io_pool, (void *)bdev_io);
 	}
 
 	assert(ch->per_thread_cache_count == 0);
@@ -529,6 +553,7 @@ spdk_bdev_module_examine_done(struct spdk_bdev_module *module)
 static int
 spdk_bdev_module_channel_create(void *io_device, void *ctx_buf)
 {
+	struct spdk_io_channel *io_channel = spdk_io_channel_from_ctx(ctx_buf);
 	struct spdk_bdev_module_channel *ch = ctx_buf;
 	struct spdk_io_channel *mgmt_ch;
 
@@ -536,7 +561,8 @@ spdk_bdev_module_channel_create(void *io_device, void *ctx_buf)
 	TAILQ_INIT(&ch->nomem_io);
 	ch->nomem_threshold = 0;
 
-	mgmt_ch = spdk_get_io_channel(&g_bdev_mgr);
+	mgmt_ch = spdk_get_io_channel_mq(&g_bdev_mgr, io_channel->channel_id);
+
 	if (!mgmt_ch) {
 		return -1;
 	}
@@ -645,6 +671,7 @@ spdk_bdev_initialize(spdk_bdev_init_cb cb_fn, void *cb_arg)
 		return;
 	}
 
+	pthread_spin_init(&g_bdev_mgr.lock, 0);
 #ifdef SPDK_CONFIG_VTUNE
 	g_bdev_mgr.domain = __itt_domain_create("spdk_bdev");
 #endif
@@ -814,17 +841,21 @@ spdk_bdev_get_io(struct spdk_bdev_channel *channel)
 	struct spdk_bdev_mgmt_channel *ch = channel->module_ch->mgmt_ch;
 	struct spdk_bdev_io *bdev_io;
 
+	pthread_spin_lock(&channel->lock);
+
 	if (ch->per_thread_cache_count > 0) {
 		bdev_io = STAILQ_FIRST(&ch->per_thread_cache);
 		STAILQ_REMOVE_HEAD(&ch->per_thread_cache, buf_link);
 		ch->per_thread_cache_count--;
 	} else {
-		bdev_io = spdk_mempool_get(g_bdev_mgr.bdev_io_pool);
+		bdev_io = spdk_mempool_safe_get(g_bdev_mgr.bdev_io_pool);
 		if (!bdev_io) {
 			SPDK_ERRLOG("Unable to get spdk_bdev_io\n");
+			pthread_spin_unlock(&channel->lock);
 			return NULL;
 		}
 	}
+	pthread_spin_unlock(&channel->lock);
 
 	return bdev_io;
 }
@@ -834,6 +865,7 @@ spdk_bdev_put_io(struct spdk_bdev_io *bdev_io)
 {
 	struct spdk_bdev_mgmt_channel *ch = bdev_io->ch->module_ch->mgmt_ch;
 
+	pthread_spin_lock(&bdev_io->ch->lock);
 	if (bdev_io->buf != NULL) {
 		spdk_bdev_io_put_buf(bdev_io);
 	}
@@ -842,8 +874,9 @@ spdk_bdev_put_io(struct spdk_bdev_io *bdev_io)
 		ch->per_thread_cache_count++;
 		STAILQ_INSERT_TAIL(&ch->per_thread_cache, bdev_io, buf_link);
 	} else {
-		spdk_mempool_put(g_bdev_mgr.bdev_io_pool, (void *)bdev_io);
+		spdk_mempool_safe_put(g_bdev_mgr.bdev_io_pool, (void *)bdev_io);
 	}
+	pthread_spin_unlock(&bdev_io->ch->lock);
 }
 
 static void
@@ -854,6 +887,7 @@ _spdk_bdev_qos_io_submit(struct spdk_bdev_channel *ch)
 	struct spdk_bdev_qos		*qos = &bdev->qos;
 	struct spdk_bdev_module_channel *module_ch = ch->module_ch;
 
+	pthread_spin_lock(&ch->lock);
 	while (!TAILQ_EMPTY(&qos->queued)) {
 		if (qos->io_submitted_this_timeslice < qos->max_ios_per_timeslice) {
 			bdev_io = TAILQ_FIRST(&qos->queued);
@@ -866,6 +900,7 @@ _spdk_bdev_qos_io_submit(struct spdk_bdev_channel *ch)
 			break;
 		}
 	}
+	pthread_spin_unlock(&ch->lock);
 }
 
 static void
@@ -878,23 +913,29 @@ _spdk_bdev_io_submit(void *ctx)
 	struct spdk_bdev_module_channel	*module_ch = bdev_ch->module_ch;
 
 	bdev_io->submit_tsc = spdk_get_ticks();
+	pthread_spin_lock(&bdev_ch->lock);
 	bdev_ch->io_outstanding++;
 	module_ch->io_outstanding++;
+	pthread_spin_unlock(&bdev_ch->lock);
 	bdev_io->in_submit_request = true;
 	if (spdk_likely(bdev_ch->flags == 0)) {
 		if (spdk_likely(TAILQ_EMPTY(&module_ch->nomem_io))) {
 			bdev->fn_table->submit_request(ch, bdev_io);
 		} else {
+			pthread_spin_lock(&bdev_ch->lock);
 			bdev_ch->io_outstanding--;
 			module_ch->io_outstanding--;
 			TAILQ_INSERT_TAIL(&module_ch->nomem_io, bdev_io, link);
+			pthread_spin_unlock(&bdev_ch->lock);
 		}
 	} else if (bdev_ch->flags & BDEV_CH_RESET_IN_PROGRESS) {
 		spdk_bdev_io_complete(bdev_io, SPDK_BDEV_IO_STATUS_FAILED);
 	} else if (bdev_ch->flags & BDEV_CH_QOS_ENABLED) {
+		pthread_spin_lock(&bdev_ch->lock);
 		bdev_ch->io_outstanding--;
 		module_ch->io_outstanding--;
 		TAILQ_INSERT_TAIL(&bdev->qos.queued, bdev_io, link);
+		pthread_spin_unlock(&bdev_ch->lock);
 		_spdk_bdev_qos_io_submit(bdev_ch);
 	} else {
 		SPDK_ERRLOG("unknown bdev_ch flag %x found\n", bdev_ch->flags);
@@ -1006,19 +1047,21 @@ static int
 _spdk_bdev_channel_create(struct spdk_bdev_channel *ch, void *io_device)
 {
 	struct spdk_bdev		*bdev = __bdev_from_io_dev(io_device);
+	struct spdk_io_channel		*io_channel = spdk_io_channel_from_ctx(ch);
 
 	ch->bdev = bdev;
-	ch->channel = bdev->fn_table->get_io_channel(bdev->ctxt);
+	ch->channel = bdev->fn_table->get_io_channel_mq(bdev->ctxt, io_channel->channel_id);
 	if (!ch->channel) {
 		return -1;
 	}
 
-	ch->module_ch = spdk_io_channel_get_ctx(spdk_get_io_channel(bdev->module));
-
+	ch->module_ch = spdk_io_channel_get_ctx(spdk_get_io_channel_mq(bdev->module, io_channel->channel_id));
 	memset(&ch->stat, 0, sizeof(ch->stat));
 	ch->io_outstanding = 0;
 	TAILQ_INIT(&ch->queued_resets);
 	ch->flags = 0;
+
+	pthread_spin_init(&ch->lock, 0);
 
 	return 0;
 }
@@ -1315,9 +1358,15 @@ spdk_bdev_alias_del(struct spdk_bdev *bdev, const char *alias)
 }
 
 struct spdk_io_channel *
+spdk_bdev_get_io_channel_mq(struct spdk_bdev_desc *desc, uint32_t channel_id)
+{
+	return spdk_get_io_channel_mq(__bdev_to_io_dev(desc->bdev), channel_id);
+}
+
+struct spdk_io_channel *
 spdk_bdev_get_io_channel(struct spdk_bdev_desc *desc)
 {
-	return spdk_get_io_channel(__bdev_to_io_dev(desc->bdev));
+	return spdk_bdev_get_io_channel_mq(desc, DEFAULT_CHANNEL_ID);
 }
 
 const char *
@@ -2105,11 +2154,13 @@ _spdk_bdev_ch_retry_io(struct spdk_bdev_channel *bdev_ch)
 	}
 
 	while (!TAILQ_EMPTY(&module_ch->nomem_io)) {
+		pthread_spin_lock(&bdev_ch->lock);
 		bdev_io = TAILQ_FIRST(&module_ch->nomem_io);
 		TAILQ_REMOVE(&module_ch->nomem_io, bdev_io, link);
 		bdev_io->ch->io_outstanding++;
 		module_ch->io_outstanding++;
 		bdev_io->status = SPDK_BDEV_IO_STATUS_PENDING;
+		pthread_spin_unlock(&bdev_ch->lock);
 		bdev->fn_table->submit_request(bdev_io->ch->channel, bdev_io);
 		if (bdev_io->status == SPDK_BDEV_IO_STATUS_NOMEM) {
 			break;
@@ -2142,6 +2193,7 @@ _spdk_bdev_io_complete(void *ctx)
 	}
 
 	if (bdev_io->status == SPDK_BDEV_IO_STATUS_SUCCESS) {
+		pthread_spin_lock(&bdev_io->ch->lock);
 		switch (bdev_io->type) {
 		case SPDK_BDEV_IO_TYPE_READ:
 			bdev_io->ch->stat.bytes_read += bdev_io->u.bdev.num_blocks * bdev_io->bdev->blocklen;
@@ -2156,6 +2208,7 @@ _spdk_bdev_io_complete(void *ctx)
 		default:
 			break;
 		}
+		pthread_spin_unlock(&bdev_io->ch->lock);
 	}
 
 #ifdef SPDK_CONFIG_VTUNE
@@ -2163,6 +2216,7 @@ _spdk_bdev_io_complete(void *ctx)
 	if (now_tsc > (bdev_io->ch->start_tsc + bdev_io->ch->interval_tsc)) {
 		uint64_t data[5];
 
+		pthread_spin_lock(&bdev_io->ch->lock);
 		data[0] = bdev_io->ch->stat.num_read_ops;
 		data[1] = bdev_io->ch->stat.bytes_read;
 		data[2] = bdev_io->ch->stat.num_write_ops;
@@ -2175,6 +2229,7 @@ _spdk_bdev_io_complete(void *ctx)
 
 		memset(&bdev_io->ch->stat, 0, sizeof(bdev_io->ch->stat));
 		bdev_io->ch->start_tsc = now_tsc;
+		pthread_spin_unlock(&bdev_io->ch->lock);
 	}
 #endif
 
@@ -2257,12 +2312,15 @@ spdk_bdev_io_complete(struct spdk_bdev_io *bdev_io, enum spdk_bdev_io_status sta
 			return;
 		}
 	} else {
+		pthread_spin_lock(&bdev_ch->lock);
 		assert(bdev_ch->io_outstanding > 0);
 		assert(module_ch->io_outstanding > 0);
 		bdev_ch->io_outstanding--;
 		module_ch->io_outstanding--;
+		pthread_spin_unlock(&bdev_ch->lock);
 
 		if (spdk_unlikely(status == SPDK_BDEV_IO_STATUS_NOMEM)) {
+			pthread_spin_lock(&bdev_ch->lock);
 			TAILQ_INSERT_HEAD(&module_ch->nomem_io, bdev_io, link);
 			/*
 			 * Wait for some of the outstanding I/O to complete before we
@@ -2272,6 +2330,7 @@ spdk_bdev_io_complete(struct spdk_bdev_io *bdev_io, enum spdk_bdev_io_status sta
 			 */
 			module_ch->nomem_threshold = spdk_max((int64_t)module_ch->io_outstanding / 2,
 							      (int64_t)module_ch->io_outstanding - NOMEM_THRESHOLD_COUNT);
+			pthread_spin_unlock(&bdev_ch->lock);
 			return;
 		}
 
@@ -2449,6 +2508,7 @@ spdk_bdev_init(struct spdk_bdev *bdev)
 				sizeof(struct spdk_bdev_channel));
 
 	pthread_mutex_init(&bdev->mutex, NULL);
+
 	return 0;
 }
 

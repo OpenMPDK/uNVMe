@@ -64,7 +64,7 @@ static void
 _spdk_blob_verify_md_op(struct spdk_blob *blob)
 {
 	assert(blob != NULL);
-	assert(spdk_get_thread() == blob->bs->md_thread);
+//	assert(spdk_get_thread() == blob->bs->md_thread);
 	assert(blob->state != SPDK_BLOB_STATE_LOADING);
 }
 
@@ -1996,6 +1996,7 @@ static int
 _spdk_bs_channel_create(void *io_device, void *ctx_buf)
 {
 	struct spdk_blob_store		*bs = io_device;
+	struct spdk_io_channel		*io_channel = spdk_io_channel_from_ctx(ctx_buf);
 	struct spdk_bs_channel		*channel = ctx_buf;
 	struct spdk_bs_dev		*dev;
 	uint32_t			max_ops = bs->max_channel_ops;
@@ -2016,7 +2017,8 @@ _spdk_bs_channel_create(void *io_device, void *ctx_buf)
 
 	channel->bs = bs;
 	channel->dev = dev;
-	channel->dev_channel = dev->create_channel(dev);
+	pthread_spin_init(&channel->lock, 0);
+	channel->dev_channel = dev->create_channel_mq(dev, io_channel->channel_id);
 
 	if (!channel->dev_channel) {
 		SPDK_ERRLOG("Failed to create device channel.\n");
@@ -2191,9 +2193,15 @@ _spdk_bs_blob_list_free(struct spdk_blob_store *bs)
 static void
 _spdk_bs_free(struct spdk_blob_store *bs)
 {
+	uint32_t i;
+
 	_spdk_bs_blob_list_free(bs);
 
 	spdk_bs_unregister_md_thread(bs);
+	for (i = spdk_env_get_first_core(); i != UINT32_MAX; i = spdk_env_get_next_core(i)) {
+		if(i != 0) spdk_put_io_channel(bs->bs_channel_mq[i]);
+	}
+
 	spdk_io_device_unregister(bs, _spdk_bs_dev_destroy);
 }
 
@@ -2227,6 +2235,7 @@ _spdk_bs_alloc(struct spdk_bs_dev *dev, struct spdk_bs_opts *opts)
 	struct spdk_blob_store	*bs;
 	uint64_t dev_size;
 	int rc;
+	uint32_t i;
 
 	dev_size = dev->blocklen * dev->blockcnt;
 	if (dev_size < opts->cluster_sz) {
@@ -2274,11 +2283,26 @@ _spdk_bs_alloc(struct spdk_bs_dev *dev, struct spdk_bs_opts *opts)
 	bs->used_md_pages = spdk_bit_array_create(1);
 	bs->used_blobids = spdk_bit_array_create(0);
 
+	// init multi-channel
+
 	pthread_mutex_init(&bs->used_clusters_mutex, NULL);
 
 	spdk_io_device_register(bs, _spdk_bs_channel_create, _spdk_bs_channel_destroy,
 				sizeof(struct spdk_bs_channel));
 	rc = spdk_bs_register_md_thread(bs);
+
+	for (i = spdk_env_get_first_core(); i != UINT32_MAX; i = spdk_env_get_next_core(i)) {
+		if (i == 0) {
+			bs->bs_channel_mq[i] = bs->md_channel;
+			continue;
+		}
+		bs->bs_channel_mq[i] = spdk_get_io_channel_mq_bs(bs, i);
+		if (bs->bs_channel_mq[i] == 0) {
+			fprintf(stderr, "%s:%d:%s:memalloc fail ", __FILE__, __LINE__, __FUNCTION__);
+			exit(1);
+		}
+	}
+
 	if (rc == -1) {
 		spdk_io_device_unregister(bs, NULL);
 		pthread_mutex_destroy(&bs->used_clusters_mutex);
@@ -4477,6 +4501,11 @@ void spdk_blob_close(struct spdk_blob *blob, spdk_blob_op_complete cb_fn, void *
 struct spdk_io_channel *spdk_bs_alloc_io_channel(struct spdk_blob_store *bs)
 {
 	return spdk_get_io_channel(bs);
+}
+
+struct spdk_io_channel *spdk_bs_alloc_io_channel_mq(struct spdk_blob_store *bs, int qid)
+{
+	return bs->bs_channel_mq[qid];
 }
 
 void spdk_bs_free_io_channel(struct spdk_io_channel *channel)

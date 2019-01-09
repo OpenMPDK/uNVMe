@@ -73,6 +73,15 @@ __call_fn(void *arg1, void *arg2)
 }
 
 static void
+__send_request_mq(fs_request_fn fn, void *arg, int qid)
+{
+	struct spdk_event *event;
+
+	event = spdk_event_allocate(qid, __call_fn, (void *)fn, arg);
+	spdk_event_call(event);
+}
+
+static void
 __send_request(fs_request_fn fn, void *arg)
 {
 	struct spdk_event *event;
@@ -293,8 +302,15 @@ init_cb(void *ctx, struct spdk_filesystem *fs, int fserrno)
 {
 	struct spdk_event *event;
 
+	if ((fs == NULL) || (fserrno != 0)) {
+		SPDK_ERRLOG("Failed to initialize fuse.\n");
+		spdk_app_stop(fserrno);
+		kv_sdk_finalize();
+		exit(EXIT_FAILURE);
+	}
 	g_fs = fs;
-	g_channel = spdk_fs_alloc_io_channel_sync(g_fs);
+	set_fs_set_send_request_mq_fn(fs, __send_request_mq);
+	g_channel = spdk_fs_alloc_io_channel_sync(g_fs, 0);
 	event = spdk_event_allocate(1, start_fuse_fn, NULL, NULL);
 	spdk_event_call(event);
 }
@@ -325,7 +341,6 @@ int main(int argc, char **argv)
 {
 	kv_sdk sdk_opt;
 	struct spdk_app_opts opts = {};
-	struct spdk_env_opts env_opts;
 	char* config_json_path;
 	uint64_t app_hugemem_size_mb;
 	uint64_t fs_cache_size_mb;
@@ -343,25 +358,30 @@ int main(int argc, char **argv)
 	g_fuse_argc = argc - 2;
 	g_fuse_argv = &argv[1];
 
-	kv_sdk_load_option(&sdk_opt, config_json_path);
+	memset(&sdk_opt, 0, sizeof(kv_sdk));
+	rc = kv_sdk_load_option(&sdk_opt, config_json_path);
+	if (rc != KV_SUCCESS) {
+                fprintf(stderr, "Error while loading JSON configuration.\n");
+                exit(EXIT_FAILURE);
+	}
+
+	if (sdk_opt.ssd_type != LBA_TYPE_SSD) {
+		fprintf(stderr, "This application does not support KV SSD.\n");
+		exit(EXIT_FAILURE);
+	}
 
 	app_hugemem_size_mb = sdk_opt.app_hugemem_size / ((uint64_t)(1024 * 1024));
 	if(MIN_APP_HUGEMEM_SIZE_MB > app_hugemem_size_mb) {
 		fprintf(stderr, "app_hugemem_size must be larger than MIN_APP_HUGEMEM_SIZE_MB(%llu)\n", MIN_APP_HUGEMEM_SIZE_MB);
-		exit(1);
+               exit(EXIT_FAILURE);
 	}
 	else{
 		fs_cache_size_mb = app_hugemem_size_mb - MIN_APP_HUGEMEM_SIZE_MB;
 	}
 
-	env_opts.name = "KV_Interface";
-	env_opts.mem_size = app_hugemem_size_mb;
-	env_opts.core_mask = "0x3";
-	env_opts.shm_id = getpid();
-
-	rc = kv_sdk_init_with_spdk_opts(KV_SDK_INIT_FROM_STR, &sdk_opt, &env_opts);
+	rc = kv_sdk_init(KV_SDK_INIT_FROM_STR, &sdk_opt);
 	if (rc != KV_SUCCESS) {
-		SPDK_ERRLOG("Error while doing sdk init.\n");
+		fprintf(stderr, "Error while doing sdk init.\n");
 		exit(EXIT_FAILURE);
 	}
 

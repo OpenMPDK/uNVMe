@@ -177,11 +177,17 @@ spdk_bs_bdev_claim(struct spdk_bs_dev *bs_dev, struct spdk_bdev_module *module)
 }
 
 static struct spdk_io_channel *
-bdev_blob_create_channel(struct spdk_bs_dev *dev)
+bdev_blob_create_channel_mq(struct spdk_bs_dev *dev, uint32_t channel_id)
 {
 	struct blob_bdev *blob_bdev = (struct blob_bdev *)dev;
 
-	return spdk_bdev_get_io_channel(blob_bdev->desc);
+	return spdk_bdev_get_io_channel_mq(blob_bdev->desc, channel_id);
+}
+
+static struct spdk_io_channel *
+bdev_blob_create_channel(struct spdk_bs_dev *dev)
+{
+	return bdev_blob_create_channel_mq(dev, DEFAULT_CHANNEL_ID);
 }
 
 static void
@@ -229,6 +235,7 @@ spdk_bdev_create_bs_dev(struct spdk_bdev *bdev, spdk_bdev_remove_cb_t remove_cb,
 	b->bs_dev.blockcnt = spdk_bdev_get_num_blocks(bdev);
 	b->bs_dev.blocklen = spdk_bdev_get_block_size(bdev);
 	b->bs_dev.create_channel = bdev_blob_create_channel;
+	b->bs_dev.create_channel_mq = bdev_blob_create_channel_mq;
 	b->bs_dev.destroy_channel = bdev_blob_destroy_channel;
 	b->bs_dev.destroy = bdev_blob_destroy;
 	b->bs_dev.read = bdev_blob_read;

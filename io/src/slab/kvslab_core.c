@@ -47,12 +47,12 @@
 		exit(-1);				\
 	}						\
 
-struct kvsl_settings kv_settings;		/* fatcache settings */
+struct kvsl_settings kv_settings;
 
 static uint32_t *kv_nfree_msinfoq;		/* # free memory slabinfo q */
 static struct kvsl_slabhinfo *kv_free_msinfoq;  /* free memory slabinfo q */
 static uint32_t *kv_nfull_msinfoq;		/* # full memory slabinfo q */
-static struct kvsl_slabhinfo *kv_full_msinfoq;	/* # full memory slabinfo q */
+static struct kvsl_slabhinfo *kv_full_msinfoq;	/* full memory slabinfo q */
 
 static uint8_t kv_nctable;			/* # class table entry */
 struct kvsl_slabclass *kv_ctable;		/* table of slabclass indexed by cid */

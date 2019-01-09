@@ -322,3 +322,15 @@ spdk_env_get_core_count(void)
 {
 	return 1;
 }
+
+uint32_t
+spdk_env_get_first_core(void)
+{
+	return 1;
+}
+
+uint32_t
+spdk_env_get_next_core(uint32_t prev_core)
+{
+	return prev_core;
+}

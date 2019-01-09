@@ -175,19 +175,6 @@ build_app(){
 		fi
 	fi
 
-	if [ -d "unvme_rocksdb" ]; then
-		log_normal "[Build App - unvme_rocksdb]"
-		cd unvme_rocksdb
-		make db_bench -j 4
-		ret=$?
-		cd ..
-		if [ $ret = 0 ]; then
-			log_normal "[Build App - unvme_rocksdb].. Done"
-		else
-			log_error "[Build App - unvme_rocksdb].. Error"
-		fi
-	fi
-
 	if [ -d "blob_cli" ]; then
 		log_normal "[Build App - blob_cli]"
 		cd blob_cli
@@ -198,6 +185,32 @@ build_app(){
 			log_normal "[Build App - blob_cli].. Done"
 		else
 			log_error "[Build App - blob_cli].. Error"
+		fi
+	fi
+
+	if [ -d "blobfs_perf" ]; then
+		log_normal "[Build App - blobfs_perf]"
+		cd blobfs_perf
+		make
+		ret=$?
+		cd ..
+		if [ $ret = 0 ]; then
+			log_normal "[Build App - blobfs_perf].. Done"
+		else
+			log_error "[Build App - blobfs_perf].. Error"
+		fi
+	fi
+
+	if [ -d "unvme_rocksdb" ]; then
+		log_normal "[Build App - unvme_rocksdb]"
+		cd unvme_rocksdb
+		make db_bench -j 4
+		ret=$?
+		cd ..
+		if [ $ret = 0 ]; then
+			log_normal "[Build App - unvme_rocksdb].. Done"
+		else
+			log_error "[Build App - unvme_rocksdb].. Error"
 		fi
 	fi
 
@@ -269,7 +282,12 @@ clean(){
 	log_normal "[Clean driver / io / sdk / app]"
 	cd io && scons -c && cd ..
 	cd driver && make clean && cd ..
-	cd app && make clean && cd ..
+	cd app
+	cd fio_plugin && make clean && cd ..
+	cd fuse && make clean && cd ..
+	cd mkfs && make clean && cd ..
+	cd unvme_rocksdb && make clean && cd ..
+	cd ..
 	rm -rf bin
 	log_normal "[Clean driver / io / sdk / app].. Done"
 }

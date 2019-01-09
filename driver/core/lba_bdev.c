@@ -34,6 +34,8 @@
 
 #include <kv_types.h>
 #include <kv_apis.h>
+#include <sys/shm.h>
+#include <sys/stat.h>
 
 #include "spdk/stdinc.h"
 
@@ -92,7 +94,7 @@ static TAILQ_HEAD(, nvme_bdev) g_nvme_bdevs = TAILQ_HEAD_INITIALIZER(g_nvme_bdev
 static void nvme_ctrlr_create_bdevs(struct nvme_ctrlr *nvme_ctrlr);
 static int bdev_nvme_library_init(void);
 static void bdev_nvme_library_fini(void);
-static int bdev_nvme_queue_cmd(struct nvme_bdev *bdev,
+static int bdev_nvme_queue_cmd(struct nvme_bdev *bdev, int qid,
 		    struct nvme_bdev_io *bio,
 		    int direction, struct iovec *iov, int iovcnt, uint64_t lba_count,
 		    uint64_t offset);
@@ -120,7 +122,7 @@ static int bdev_nvme_readv(struct nvme_bdev *nbdev, struct spdk_io_channel *ch,
 	SPDK_DEBUGLOG(SPDK_LOG_BDEV_MPDK, "read %lu lbas with offset %#lx\n",
 		      lba_count, offset);
 
-	return bdev_nvme_queue_cmd(nbdev, bio, BDEV_DISK_READ,
+	return bdev_nvme_queue_cmd(nbdev, ch->channel_id, bio, BDEV_DISK_READ,
 				 iov, iovcnt, lba_count, offset);
 }
 
@@ -128,11 +130,10 @@ static int bdev_nvme_writev(struct nvme_bdev *nbdev, struct spdk_io_channel *ch,
 		 struct nvme_bdev_io *bio,
 		 struct iovec *iov, int iovcnt, uint64_t lba_count, uint64_t offset)
 {
-	
 	SPDK_DEBUGLOG(SPDK_LOG_BDEV_MPDK, "write %lu lbas with offset %#lx\n",
 		      lba_count, offset);
 
-	return bdev_nvme_queue_cmd(nbdev, bio, BDEV_DISK_WRITE,
+	return bdev_nvme_queue_cmd(nbdev, ch->channel_id, bio, BDEV_DISK_WRITE,
 				 iov, iovcnt, lba_count, offset);
 }
 
@@ -161,16 +162,9 @@ static bool bdev_nvme_io_type_supported(void __attribute__((__unused__)) *ctx, e
 
 static int bdev_nvme_poll(void *arg)
 {
-	int qid;
-	uint64_t *handle = arg;
+	struct nvme_io_channel *ch = arg;
 
-	qid = sched_getcpu();
-	if(qid < 0) {
-		SPDK_WARNLOG("Could not get the CPU Core ID, Using Default 0");
-		qid = 0;
-	}
-
-	kv_process_completion_queue(*(uint64_t *)handle, qid);
+	kv_process_completion(*(uint64_t*)ch->handle);
 
 	return 0; // Return value not used in the Reactor.c
 }
@@ -178,26 +172,38 @@ static int bdev_nvme_poll(void *arg)
 static int bdev_nvme_create_cb(void *io_device, void *ctx_buf)
 {
 	uint64_t *handle = io_device;
+	struct spdk_io_channel *io_channel = spdk_io_channel_from_ctx(ctx_buf);
 	struct nvme_io_channel *ch = ctx_buf;
 
-	ch->poller = spdk_poller_register(bdev_nvme_poll, handle, 0);
+	ch->handle = handle;
+
+	if (io_channel->channel_id == 0) {
+		ch->poller = spdk_poller_register(bdev_nvme_poll, ch, 0);
+	}
 
 	return 0;
 }
 
 static void bdev_nvme_destroy_cb(void *io_device, void *ctx_buf)
 {
+	struct spdk_io_channel *io_channel = spdk_io_channel_from_ctx(ctx_buf);
 	struct nvme_io_channel *ch = ctx_buf;
 
-	spdk_poller_unregister(&ch->poller);
+	if (io_channel->channel_id == 0) spdk_poller_unregister(&ch->poller);
+}
+
+static struct spdk_io_channel *
+bdev_nvme_get_io_channel_mq(void *ctx, uint32_t channel_id)
+{
+	struct nvme_bdev *nvme_bdev = ctx;
+
+	return spdk_get_io_channel_mq(&nvme_bdev->nvme_ctrlr->handle, channel_id);
 }
 
 static struct spdk_io_channel *
 bdev_nvme_get_io_channel(void *ctx)
 {
-	struct nvme_bdev *nvme_bdev = ctx;
-
-	return spdk_get_io_channel(&nvme_bdev->nvme_ctrlr->handle);
+	return bdev_nvme_get_io_channel_mq(ctx, DEFAULT_CHANNEL_ID);
 }
 
 static int bdev_nvme_destruct(void *ctx)
@@ -299,6 +305,7 @@ static const struct spdk_bdev_fn_table nvmelib_fn_table = {
 	.submit_request		= bdev_nvme_submit_request,
 	.io_type_supported	= bdev_nvme_io_type_supported,
 	.get_io_channel		= bdev_nvme_get_io_channel,
+	.get_io_channel_mq	= bdev_nvme_get_io_channel_mq
 };
 
 static void nvme_ctrlr_create_bdevs(struct nvme_ctrlr *nvme_ctrlr) {
@@ -364,13 +371,6 @@ static void bdev_nvme_queued_done(void *ref, unsigned int sct, unsigned int sc)
 	struct nvme_bdev_io *bio = ((kv_pair *)ref)->param.private_data;
 	struct spdk_bdev_io *bdev_io = spdk_bdev_io_from_ctx(bio);
 
-	if(bio->kv.value.value) {
-		if (bio->direction == BDEV_DISK_READ) {
-			memcpy((uint8_t *)bio->iov->iov_base, (uint8_t *)bio->kv.value.value, bio->kv.value.length);
-		}
-		spdk_free(bio->kv.value.value);
-	}
-
 	if(bio->kv.key.key) {
 		spdk_free(bio->kv.key.key);
 	}
@@ -378,7 +378,7 @@ static void bdev_nvme_queued_done(void *ref, unsigned int sct, unsigned int sc)
 	spdk_bdev_io_complete_nvme_status(bdev_io, sct, sc);
 }
 
-static int bdev_nvme_queue_cmd(struct nvme_bdev *bdev,
+static int bdev_nvme_queue_cmd(struct nvme_bdev *bdev, int qid,
 		    struct nvme_bdev_io *bio,
 		    int direction, struct iovec *iov, int iovcnt, uint64_t lba_count,
 		    uint64_t offset)
@@ -402,20 +402,12 @@ static int bdev_nvme_queue_cmd(struct nvme_bdev *bdev,
 	*(uint64_t*)(bio->kv.key.key) = lba;
 	bio->kv.key.length = key_length;
 
-	bio->kv.value.value = spdk_dma_zmalloc(nbytes, 0, NULL);
-	if(!bio->kv.value.value) {
-		spdk_free(bio->kv.key.key);
-		SPDK_ERRLOG("Memory not available for Value\n");
-		return -ENOMEM;
-	}
-
-	memcpy((uint8_t *)bio->kv.value.value, (uint8_t *)iov->iov_base, nbytes);
-
+	bio->kv.value.value = iov->iov_base;
 	bio->kv.value.length = nbytes;
+
 	bio->kv.param.async_cb = bdev_nvme_queued_done;
 	bio->kv.param.private_data = bio;
 
-	int qid = sched_getcpu();
 	if(qid < 0) {
 		SPDK_WARNLOG("Could not get the CPU Core ID, Using Default 0");
 		qid = 0;
@@ -428,7 +420,6 @@ static int bdev_nvme_queue_cmd(struct nvme_bdev *bdev,
 	}
 
 	if (rc != 0) {
-		spdk_free(bio->kv.value.value);
 		spdk_free(bio->kv.key.key);
 	}
 
@@ -447,7 +438,7 @@ static int bdev_nvme_unmap(struct nvme_bdev *bdev, struct spdk_io_channel *ch,
 	int rc = 0;
 	uint64_t handle = bdev->nvme_ctrlr->handle;
 	uint32_t key_length = 16;
-	int qid;
+	int qid = ch->channel_id;
 
 	bio->kv.key.key = spdk_dma_zmalloc(key_length, 0, NULL);
 	if(!bio->kv.key.key) {
@@ -463,7 +454,6 @@ static int bdev_nvme_unmap(struct nvme_bdev *bdev, struct spdk_io_channel *ch,
 	bio->kv.param.async_cb = bdev_nvme_queued_done;
 	bio->kv.param.private_data = bio;
 
-	qid = sched_getcpu();
 	if(qid < 0) {
 		SPDK_WARNLOG("Could not get the CPU Core ID, Using Default 0");
 		qid = 0;

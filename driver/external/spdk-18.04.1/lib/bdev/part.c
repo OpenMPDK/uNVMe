@@ -217,6 +217,7 @@ spdk_bdev_part_base_construct(struct spdk_bdev_part_base *base, struct spdk_bdev
 	int rc;
 
 	fn_table->get_io_channel = spdk_bdev_part_get_io_channel;
+	fn_table->get_io_channel_mq = NULL;
 	fn_table->io_type_supported = spdk_bdev_part_io_type_supported;
 
 	base->bdev = bdev;

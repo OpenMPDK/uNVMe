@@ -105,6 +105,7 @@ static struct spdk_bs_dev g_zeroes_bs_dev = {
 	.blockcnt = UINT64_MAX,
 	.blocklen = SPDK_BS_PAGE_SIZE,
 	.create_channel = NULL,
+	.create_channel_mq = NULL,
 	.destroy_channel = NULL,
 	.destroy = zeroes_destroy,
 	.read = zeroes_read,

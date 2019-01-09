@@ -83,6 +83,15 @@ __send_request(fs_request_fn fn, void *arg)
 	spdk_event_call(event);
 }
 
+static void
+__send_request_mq(fs_request_fn fn, void *arg, int qid)
+{
+       struct spdk_event *event;
+
+       event = spdk_event_allocate(qid, __call_fn, (void *)fn, arg);
+       spdk_event_call(event);
+}
+
 static std::string
 sanitize_path(const std::string &input, const std::string &mount_directory)
 {
@@ -294,7 +303,7 @@ public:
 
 
 struct thread_opt{
-	struct spdk_app_opts opts;
+	struct spdk_app_opts app_opts;
 	char* config_path;
 };
 
@@ -307,11 +316,13 @@ private:
 	std::string mBdev;
 	bool mRetainCache;
 	int mPrefetchSize;
+	int mPrefetchThreshold;
+	uint32_t mBlobfsDirectIO;
 	struct thread_opt* mInitOpt;
 
 public:
 	SpdkEnv(Env *base_env, const std::string &dir, const std::string &conf,
-		const std::string &bdev, uint64_t cache_size_in_mb, bool retain_cache, int prefetch_size);
+		const std::string &bdev, uint64_t cache_size_in_mb, bool retain_cache, int prefetch_size, int prefetch_threshold, bool use_blobfs_direct_read, bool use_blobfs_direct_write);
 
 	virtual ~SpdkEnv();
 
@@ -333,6 +344,8 @@ public:
 			if (rc == 0) {
 				spdk_file_set_retain_cache(file, mRetainCache);
 				spdk_file_set_prefetch_size(file, mPrefetchSize);
+				spdk_file_set_prefetch_threshold(file, mPrefetchThreshold);
+				spdk_file_set_direct_io(file, mBlobfsDirectIO);
 				result->reset(new SpdkSequentialFile(file));
 				return Status::OK();
 			} else {
@@ -366,6 +379,8 @@ public:
 			if (rc == 0) {
 				spdk_file_set_retain_cache(file, mRetainCache);
 				spdk_file_set_prefetch_size(file, mPrefetchSize);
+				spdk_file_set_prefetch_threshold(file, mPrefetchThreshold);
+				spdk_file_set_direct_io(file, mBlobfsDirectIO);
 				result->reset(new SpdkRandomAccessFile(file));
 				return Status::OK();
 			} else {
@@ -393,6 +408,11 @@ public:
 			rc = spdk_fs_open_file(g_fs, g_sync_args.channel, name.c_str(),
 					       SPDK_BLOBFS_OPEN_CREATE, &file);
 			if (rc == 0) {
+                                spdk_file_set_retain_cache(file, mRetainCache);
+                                spdk_file_set_prefetch_size(file, mPrefetchSize);
+				spdk_file_set_prefetch_threshold(file, mPrefetchThreshold);
+                                spdk_file_set_direct_io(file, mBlobfsDirectIO);
+
 				result->reset(new SpdkWritableFile(file));
 				return Status::OK();
 			} else {
@@ -499,6 +519,7 @@ public:
 		spdk_fs_open_file(g_fs, g_sync_args.channel, name.c_str(),
 				  SPDK_BLOBFS_OPEN_CREATE, (struct spdk_file **)lock);
 		spdk_file_set_retain_cache((struct spdk_file*)*lock, mRetainCache);
+		spdk_file_set_direct_io((struct spdk_file*)*lock, mBlobfsDirectIO);
 		return Status::OK();
 	}
 	virtual Status UnlockFile(FileLock *lock) override
@@ -562,8 +583,24 @@ public:
 static void
 _spdk_send_msg(spdk_thread_fn fn, void *ctx, void *thread_ctx)
 {
-	/* Not supported */
-	assert(false);
+	fn(ctx);
+}
+
+// get n-th core id
+static uint32_t get_core_id_index(uint32_t index) {
+	uint32_t lcore = spdk_env_get_first_core();
+	uint32_t i;
+
+	if (index >= spdk_env_get_core_count()) {
+		fprintf(stderr, "%s:%s:%d: invalid index for core\n", __FILE__, __FUNCTION__, __LINE__);
+		exit(1);
+	}
+
+	for (i = 0; i < index; i++) {
+		lcore = spdk_env_get_next_core(lcore);
+	}
+
+	return lcore;
 }
 
 void SpdkInitializeThread(void)
@@ -571,7 +608,9 @@ void SpdkInitializeThread(void)
 	if (g_fs != NULL) {
 		/* TODO: Add an event lib call to dynamically register a thread */
 		spdk_allocate_thread(_spdk_send_msg, NULL, NULL, NULL, "spdk_rocksdb");
-		g_sync_args.channel = spdk_fs_alloc_io_channel_sync(g_fs);
+		int channel_id = get_core_id_index(sched_getcpu() % spdk_env_get_core_count());
+
+		g_sync_args.channel = spdk_fs_alloc_io_channel_sync(g_fs, channel_id);
 	}
 }
 
@@ -603,9 +642,15 @@ void SpdkEnv::StartThread(void (*function)(void *arg), void *arg)
 static void
 fs_load_cb(void *ctx, struct spdk_filesystem *fs, int fserrno)
 {
-	if (fserrno == 0) {
+	if ((fs != NULL) && (fserrno == 0)) {
 		g_fs = fs;
+	} else {
+		SPDK_ERRLOG("Failed to load fs\n");
+		spdk_app_stop(fserrno);
+		kv_sdk_finalize();
+		exit(EXIT_FAILURE);
 	}
+	set_fs_set_send_request_mq_fn(g_fs, __send_request_mq);
 	g_spdk_ready = true;
 }
 
@@ -637,7 +682,7 @@ fs_unload_cb(void *ctx, int fserrno)
 }
 
 static void
-spdk_rocksdb_shutdown(void)
+spdk_rocksdb_shutdown(void *arg)
 {
 	if (g_fs != NULL) {
 		spdk_fs_unload(g_fs, fs_unload_cb, NULL);
@@ -651,15 +696,32 @@ initialize_spdk(void *arg)
 {
 	struct thread_opt *opts = (struct thread_opt *)arg;
 	int rc;
+	kv_sdk sdk_opt = {0,};
+	rc = kv_sdk_load_option(&sdk_opt, opts->config_path);
+	if (rc) {
+                SPDK_ERRLOG("Error while loading JSON configuration.\n");
+                exit(EXIT_FAILURE);
+	}
 
-	//rc = kv_sdk_init(opts->init_from, opts->options);
-	rc = kv_sdk_init(KV_SDK_INIT_FROM_JSON, (void*)opts->config_path);
+	// currently NOT support multi-device
+	// check: core_mask must include first core (core 0)
+	if (!(sdk_opt.dd_options[0].core_mask & 0x1)) {
+	        fprintf(stderr, "invalid core_mask=0x%lX (core_mask must include core 0)\n", sdk_opt.dd_options[0].core_mask);
+	        exit(1);
+	}
+
+	if (sdk_opt.ssd_type != LBA_TYPE_SSD) {
+		fprintf(stderr, "This application does not support KV SSD.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	rc = kv_sdk_init(KV_SDK_INIT_FROM_STR, &sdk_opt);
 	if (rc != KV_SUCCESS) {
 		SPDK_ERRLOG("Error while doing sdk init.\n");
 		exit(EXIT_FAILURE);
 	}
 
-	rc = spdk_app_start(&opts->opts, spdk_rocksdb_run, NULL, NULL);
+	rc = spdk_app_start(&opts->app_opts, spdk_rocksdb_run, NULL, NULL);
 	/*
 	 * TODO:  Revisit for case of internal failure of
 	 * spdk_app_start(), itself.  At this time, it's known
@@ -679,8 +741,8 @@ initialize_spdk(void *arg)
 }
 
 SpdkEnv::SpdkEnv(Env *base_env, const std::string &dir, const std::string &conf,
-		 const std::string &bdev, uint64_t cache_size_in_mb, bool retain_cache, int prefetch_size)
-	: EnvWrapper(base_env), mDirectory(dir), mConfig(conf), mBdev(bdev), mRetainCache(retain_cache), mPrefetchSize(prefetch_size)
+		 const std::string &bdev, uint64_t cache_size_in_mb, bool retain_cache, int prefetch_size, int prefetch_threshold, bool use_blobfs_direct_read, bool use_blobfs_direct_write)
+	: EnvWrapper(base_env), mDirectory(dir), mConfig(conf), mBdev(bdev), mRetainCache(retain_cache), mPrefetchSize(prefetch_size), mPrefetchThreshold(prefetch_threshold)
 {
 	mInitOpt = new struct thread_opt;
 	if(!mInitOpt){
@@ -688,14 +750,22 @@ SpdkEnv::SpdkEnv(Env *base_env, const std::string &dir, const std::string &conf,
 		exit(1);
 	}
 
-	spdk_app_opts_init(&mInitOpt->opts);
-	mInitOpt->opts.mem_size = 1024 + cache_size_in_mb;
-	mInitOpt->opts.shutdown_cb = spdk_rocksdb_shutdown;
-	mInitOpt->config_path = const_cast<char*> (mConfig.c_str());
+	spdk_app_opts_init(&mInitOpt->app_opts);
+	//mInitOpt->app_opts.shutdown_cb = spdk_rocksdb_shutdown;
+	mInitOpt->app_opts.max_delay_us = 1;
+	mInitOpt->config_path = const_cast<char*>(mConfig.c_str());
 
 	fprintf(stderr,"retain_cache = %d\n",mRetainCache);
 	spdk_fs_set_cache_size(cache_size_in_mb);
 	g_bdev_name = mBdev;
+
+	mBlobfsDirectIO = BLOBFS_BUFFERED_IO;
+	if (use_blobfs_direct_read) {
+		mBlobfsDirectIO |= BLOBFS_DIRECT_READ;
+	}
+	if (use_blobfs_direct_write) {
+		mBlobfsDirectIO |= BLOBFS_DIRECT_WRITE;
+	}
 
 	pthread_create(&mSpdkTid, NULL, &initialize_spdk, mInitOpt);
 
@@ -731,15 +801,16 @@ SpdkEnv::~SpdkEnv()
 		}
 	}
 
-	spdk_app_start_shutdown();
+	//spdk_app_start_shutdown();
+	__send_request(spdk_rocksdb_shutdown, NULL);
 	pthread_join(mSpdkTid, NULL);
 }
 
 Env *NewSpdkEnv(Env *base_env, const std::string &dir, const std::string &conf,
-		const std::string &bdev, uint64_t cache_size_in_mb, bool retain_cache, int prefetch_size)
+		const std::string &bdev, uint64_t cache_size_in_mb, bool retain_cache, int prefetch_size, int prefetch_threshold, bool use_blobfs_direct_read, bool use_blobfs_direct_write)
 {
 	try {
-		SpdkEnv *spdk_env = new SpdkEnv(base_env, dir, conf, bdev, cache_size_in_mb, retain_cache, prefetch_size);
+		SpdkEnv *spdk_env = new SpdkEnv(base_env, dir, conf, bdev, cache_size_in_mb, retain_cache, prefetch_size, prefetch_threshold, use_blobfs_direct_read, use_blobfs_direct_write);
 		if (g_fs != NULL) {
 			return spdk_env;
 		} else {

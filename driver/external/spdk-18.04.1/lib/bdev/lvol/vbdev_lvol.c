@@ -857,6 +857,7 @@ static struct spdk_bdev_fn_table vbdev_lvol_fn_table = {
 	.io_type_supported	= vbdev_lvol_io_type_supported,
 	.submit_request		= vbdev_lvol_submit_request,
 	.get_io_channel		= vbdev_lvol_get_io_channel,
+	.get_io_channel_mq	= NULL,
 	.dump_info_json		= vbdev_lvol_dump_info_json,
 	.write_config_json	= vbdev_lvol_write_config_json,
 };

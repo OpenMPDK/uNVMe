@@ -59,7 +59,7 @@ int kvslab_init(size_t total_slab_size, int slab_alloc_policy, int nr_ssd){
 
 	status = kvsl_slab_init();
 	if (status != KVSLAB_OK) {
-		exit(1);
+		return KVSLAB_ERROR;
 	}
 
         kvsl_slab_mutex = malloc(nr_ssd*sizeof(pthread_mutex_t));

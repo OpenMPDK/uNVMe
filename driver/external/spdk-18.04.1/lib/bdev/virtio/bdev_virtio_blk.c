@@ -274,6 +274,7 @@ static const struct spdk_bdev_fn_table virtio_fn_table = {
 	.submit_request		= bdev_virtio_submit_request,
 	.io_type_supported	= bdev_virtio_io_type_supported,
 	.get_io_channel		= bdev_virtio_get_io_channel,
+	.get_io_channel_mq	= NULL,
 	.dump_info_json		= bdev_virtio_dump_json_config,
 	.write_config_json	= bdev_virtio_write_config_json,
 };

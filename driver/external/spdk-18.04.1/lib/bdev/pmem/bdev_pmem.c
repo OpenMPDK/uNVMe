@@ -300,6 +300,7 @@ static const struct spdk_bdev_fn_table pmem_fn_table = {
 	.submit_request		= bdev_pmem_submit_request,
 	.io_type_supported	= bdev_pmem_io_type_supported,
 	.get_io_channel		= bdev_pmem_get_io_channel,
+	.get_io_channel_mq	= NULL,
 	.dump_info_json		= bdev_pmem_dump_info_json,
 	.write_config_json	= bdev_pmem_write_config_json,
 };

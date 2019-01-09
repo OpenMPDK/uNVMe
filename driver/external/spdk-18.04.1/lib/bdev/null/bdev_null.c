@@ -156,6 +156,7 @@ static const struct spdk_bdev_fn_table null_fn_table = {
 	.submit_request		= bdev_null_submit_request,
 	.io_type_supported	= bdev_null_io_type_supported,
 	.get_io_channel		= bdev_null_get_io_channel,
+	.get_io_channel_mq	= NULL,
 	.write_config_json	= bdev_null_write_config_json,
 };
 

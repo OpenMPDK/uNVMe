@@ -717,7 +717,11 @@ spdk_reactors_init(unsigned int max_delay_us)
 
 	SPDK_ENV_FOREACH_CORE(i) {
 		reactor = spdk_reactor_get(i);
-		spdk_reactor_construct(reactor, i, max_delay_us);
+		if (i == 0) {
+			spdk_reactor_construct(reactor, i, 0);
+		} else {
+			spdk_reactor_construct(reactor, i, max_delay_us);
+		}
 	}
 
 	g_reactor_state = SPDK_REACTOR_STATE_INITIALIZED;

@@ -69,6 +69,12 @@ init_cb(void *ctx, struct spdk_filesystem *fs, int fserrno)
 {
 	struct spdk_event *event;
 
+	if ((fs == NULL) || (fserrno != 0)) {
+		SPDK_ERRLOG("Failed to initialize blobfs.\n");
+		spdk_app_stop(fserrno);
+		kv_sdk_finalize();
+		exit(EXIT_FAILURE);
+	}
 	event = spdk_event_allocate(0, shutdown_cb, fs, NULL);
 	spdk_event_call(event);
 }
@@ -144,19 +150,29 @@ int main(int argc, char **argv)
 		config_json_path = argv[2];
 	}
 
-	kv_sdk_load_option(&sdk_opt, config_json_path);
+	memset(&sdk_opt, 0, sizeof(kv_sdk));
+	rc = kv_sdk_load_option(&sdk_opt, config_json_path);
+	if (rc != KV_SUCCESS) {
+                fprintf(stderr, "Error while loading JSON configuration.\n");
+                exit(EXIT_FAILURE);
+	}
+
+	if (sdk_opt.ssd_type != LBA_TYPE_SSD) {
+                fprintf(stderr, "This application does not support KV SSD.\n");
+                exit(EXIT_FAILURE);
+	}
 
 	app_hugemem_size_mb = sdk_opt.app_hugemem_size / ((uint64_t)(1024 * 1024));
 	if(MIN_APP_HUGEMEM_SIZE_MB > app_hugemem_size_mb) {
 		fprintf(stderr, "app_hugemem_size must be larger than MIN_APP_HUGEMEM_SIZE_MB(%llu)\n", MIN_APP_HUGEMEM_SIZE_MB);
-		exit(1);
+                exit(EXIT_FAILURE);
 	} else {
 		fs_cache_size_mb = app_hugemem_size_mb - MIN_APP_HUGEMEM_SIZE_MB;
 	}
 
         rc = kv_sdk_init(KV_SDK_INIT_FROM_STR, &sdk_opt);
         if (rc != KV_SUCCESS) {
-                SPDK_ERRLOG("Error while doing sdk init.\n");
+                fprintf(stderr, "Error while doing sdk init.\n");
                 exit(EXIT_FAILURE);
         }
 

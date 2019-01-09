@@ -44,7 +44,10 @@ fi
 : ${NUM_KEYS:=1000000000}
 : ${RETAIN_CACHE:=0}
 : ${PREFETCH_CTL:=0}
+: ${BLOBFS_DIRECT_READ:=0}
+: ${BLOBFS_DIRECT_WRITE:=0}
 : ${READ_REPEAT:=1}
+: ${PREFETCH_THRESHOLD:=131702}
 
 if [ "$NO_SPDK" = "1" ]
 then
@@ -144,6 +147,9 @@ run_step() {
 	  echo "--spdk_cache_size=$CACHE_SIZE" >> "$1"_flags.txt
 	  echo "--use_retain_cache=$RETAIN_CACHE" >> "$1"_flags.txt
 	  echo "--use_prefetch_ctl=$PREFETCH_CTL" >> "$1"_flags.txt
+	  echo "--use_blobfs_direct_read=$BLOBFS_DIRECT_READ" >> "$1"_flags.txt
+	  echo "--use_blobfs_direct_write=$BLOBFS_DIRECT_WRITE" >> "$1"_flags.txt
+	  echo "--prefetch_threshold=$PREFETCH_THRESHOLD" >> "$1"_flags.txt
 	fi
 
 	if [ "$NO_SPDK" = "1" ]

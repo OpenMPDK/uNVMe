@@ -85,7 +85,9 @@ spdk_bs_request_set_complete(struct spdk_bs_request_set *set)
 	struct spdk_bs_cpl cpl = set->cpl;
 	int bserrno = set->bserrno;
 
+	pthread_spin_lock(&set->channel->lock);
 	TAILQ_INSERT_TAIL(&set->channel->reqs, set, link);
+	pthread_spin_unlock(&set->channel->lock);
 
 	spdk_bs_call_cpl(&cpl, bserrno);
 }
@@ -108,11 +110,14 @@ spdk_bs_sequence_start(struct spdk_io_channel *_channel,
 
 	channel = spdk_io_channel_get_ctx(_channel);
 
+	pthread_spin_lock(&channel->lock);
 	set = TAILQ_FIRST(&channel->reqs);
 	if (!set) {
+		pthread_spin_unlock(&channel->lock);
 		return NULL;
 	}
 	TAILQ_REMOVE(&channel->reqs, set, link);
+	pthread_spin_unlock(&channel->lock);
 
 	set->cpl = *cpl;
 	set->bserrno = 0;
@@ -312,11 +317,14 @@ spdk_bs_batch_open(struct spdk_io_channel *_channel,
 
 	channel = spdk_io_channel_get_ctx(_channel);
 
+	pthread_spin_lock(&channel->lock);
 	set = TAILQ_FIRST(&channel->reqs);
 	if (!set) {
+		pthread_spin_unlock(&channel->lock);
 		return NULL;
 	}
 	TAILQ_REMOVE(&channel->reqs, set, link);
+	pthread_spin_unlock(&channel->lock);
 
 	set->cpl = *cpl;
 	set->bserrno = 0;
@@ -544,11 +552,14 @@ spdk_bs_user_op_alloc(struct spdk_io_channel *_channel, struct spdk_bs_cpl *cpl,
 
 	channel = spdk_io_channel_get_ctx(_channel);
 
+	pthread_spin_lock(&channel->lock);
 	set = TAILQ_FIRST(&channel->reqs);
 	if (!set) {
+		pthread_spin_unlock(&channel->lock);
 		return NULL;
 	}
 	TAILQ_REMOVE(&channel->reqs, set, link);
+	pthread_spin_unlock(&channel->lock);
 
 	set->cpl = *cpl;
 	set->channel = channel;
@@ -604,7 +615,9 @@ spdk_bs_user_op_execute(spdk_bs_user_op_t *op)
 				    set->cpl.u.blob_basic.cb_fn, set->cpl.u.blob_basic.cb_arg);
 		break;
 	}
+	pthread_spin_lock(&set->channel->lock);
 	TAILQ_INSERT_TAIL(&set->channel->reqs, set, link);
+	pthread_spin_unlock(&set->channel->lock);
 }
 
 void
@@ -615,7 +628,9 @@ spdk_bs_user_op_abort(spdk_bs_user_op_t *op)
 	set = (struct spdk_bs_request_set *)op;
 
 	set->cpl.u.blob_basic.cb_fn(set->cpl.u.blob_basic.cb_arg, -EIO);
+	pthread_spin_lock(&set->channel->lock);
 	TAILQ_INSERT_TAIL(&set->channel->reqs, set, link);
+	pthread_spin_unlock(&set->channel->lock);
 }
 
 void

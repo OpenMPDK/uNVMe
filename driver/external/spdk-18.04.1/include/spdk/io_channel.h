@@ -50,6 +50,8 @@ struct spdk_thread;
 struct spdk_io_channel_iter;
 struct spdk_poller;
 
+#define DEFAULT_CHANNEL_ID 0
+
 typedef void (*spdk_thread_fn)(void *ctx);
 typedef void (*spdk_thread_pass_msg)(spdk_thread_fn fn, void *ctx,
 				     void *thread_ctx);
@@ -92,6 +94,7 @@ struct spdk_io_channel {
 	uint32_t			ref;
 	TAILQ_ENTRY(spdk_io_channel)	tailq;
 	spdk_io_channel_destroy_cb	destroy_cb;
+	uint32_t			channel_id;
 
 	/*
 	 * Modules will allocate extra memory off the end of this structure
@@ -244,6 +247,8 @@ void spdk_io_device_unregister(void *io_device, spdk_io_device_unregister_cb unr
  * \return a pointer to the I/O channel for this device on success or NULL on failure.
  */
 struct spdk_io_channel *spdk_get_io_channel(void *io_device);
+struct spdk_io_channel *spdk_get_io_channel_mq(void *io_device, uint32_t channel_id);
+struct spdk_io_channel *spdk_get_io_channel_mq_bs(void *io_device, uint32_t channel_id);
 
 /**
  * Release a reference to an I/O channel. This happens asynchronously.

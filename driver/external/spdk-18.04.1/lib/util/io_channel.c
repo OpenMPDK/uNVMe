@@ -44,6 +44,9 @@
 #include <pthread_np.h>
 #endif
 
+#include <sys/ipc.h>
+#include <sys/shm.h>
+
 static pthread_mutex_t g_devlist_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 struct io_device {
@@ -399,7 +402,12 @@ spdk_io_device_unregister(void *io_device, spdk_io_device_unregister_cb unregist
 }
 
 struct spdk_io_channel *
-spdk_get_io_channel(void *io_device)
+spdk_get_io_channel(void *io_device) {
+	return spdk_get_io_channel_mq(io_device, DEFAULT_CHANNEL_ID);
+}
+
+struct spdk_io_channel *
+spdk_get_io_channel_mq(void *io_device, uint32_t channel_id)
 {
 	struct spdk_io_channel *ch;
 	struct spdk_thread *thread;
@@ -426,7 +434,7 @@ spdk_get_io_channel(void *io_device)
 	}
 
 	TAILQ_FOREACH(ch, &thread->io_channels, tailq) {
-		if (ch->dev == dev) {
+		if (ch->dev == dev && ch->channel_id == channel_id) {
 			ch->ref++;
 			/*
 			 * An I/O channel already exists for this device on this
@@ -448,6 +456,65 @@ spdk_get_io_channel(void *io_device)
 	ch->destroy_cb = dev->destroy_cb;
 	ch->thread = thread;
 	ch->ref = 1;
+	ch->channel_id = channel_id;
+	TAILQ_INSERT_TAIL(&thread->io_channels, ch, tailq);
+
+	dev->refcnt++;
+
+	pthread_mutex_unlock(&g_devlist_mutex);
+
+	rc = dev->create_cb(io_device, (uint8_t *)ch + sizeof(*ch));
+	if (rc == -1) {
+		pthread_mutex_lock(&g_devlist_mutex);
+		TAILQ_REMOVE(&ch->thread->io_channels, ch, tailq);
+		dev->refcnt--;
+		free(ch);
+		pthread_mutex_unlock(&g_devlist_mutex);
+		return NULL;
+	}
+
+	return ch;
+}
+
+struct spdk_io_channel *
+spdk_get_io_channel_mq_bs(void *io_device, uint32_t channel_id) // skip a thread's device check
+{
+	struct spdk_io_channel *ch;
+	struct spdk_thread *thread;
+	struct io_device *dev;
+	int rc;
+
+	pthread_mutex_lock(&g_devlist_mutex);
+	TAILQ_FOREACH(dev, &g_io_devices, tailq) {
+		if (dev->io_device == io_device) {
+			break;
+		}
+	}
+	if (dev == NULL) {
+		SPDK_ERRLOG("could not find io_device %p\n", io_device);
+		pthread_mutex_unlock(&g_devlist_mutex);
+		return NULL;
+	}
+
+	thread = _get_thread();
+	if (!thread) {
+		SPDK_ERRLOG("No thread allocated\n");
+		pthread_mutex_unlock(&g_devlist_mutex);
+		return NULL;
+	}
+
+	ch = calloc(1, sizeof(*ch) + dev->ctx_size);
+	if (ch == NULL) {
+		SPDK_ERRLOG("could not calloc spdk_io_channel\n");
+		pthread_mutex_unlock(&g_devlist_mutex);
+		return NULL;
+	}
+
+	ch->dev = dev;
+	ch->destroy_cb = dev->destroy_cb;
+	ch->thread = thread;
+	ch->ref = 1;
+	ch->channel_id = channel_id;
 	TAILQ_INSERT_TAIL(&thread->io_channels, ch, tailq);
 
 	dev->refcnt++;

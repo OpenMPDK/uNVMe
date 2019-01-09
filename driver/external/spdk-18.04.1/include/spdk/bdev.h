@@ -360,6 +360,7 @@ const struct spdk_uuid *spdk_bdev_get_uuid(const struct spdk_bdev *bdev);
  * \return A handle to the I/O channel or NULL on failure.
  */
 struct spdk_io_channel *spdk_bdev_get_io_channel(struct spdk_bdev_desc *desc);
+struct spdk_io_channel *spdk_bdev_get_io_channel_mq(struct spdk_bdev_desc *desc, uint32_t channel_id);
 
 /**
  * Submit a read request to the bdev on the given channel.

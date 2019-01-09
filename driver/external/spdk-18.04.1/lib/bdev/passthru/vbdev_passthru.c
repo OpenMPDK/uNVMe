@@ -440,6 +440,7 @@ static const struct spdk_bdev_fn_table vbdev_passthru_fn_table = {
 	.submit_request		= vbdev_passthru_submit_request,
 	.io_type_supported	= vbdev_passthru_io_type_supported,
 	.get_io_channel		= vbdev_passthru_get_io_channel,
+	.get_io_channel_mq	= NULL,
 	.dump_info_json		= vbdev_passthru_info_config_json,
 	.write_config_json	= vbdev_passthru_write_json_config,
 };

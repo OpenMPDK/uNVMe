@@ -242,7 +242,7 @@ int sdk_iterate(void){
 
 			//KV_KEY_ITERATE case
 			if(it->kv.key.length == 0 && it->kv.value.length > 0){
-				memcpy(&cur_num_keys_read, it->kv.value.value, KV_IT_READ_BUFFER_META_LEN);
+				memcpy(&cur_num_keys_read, it->kv.value.value, KV_ITERATE_READ_BUFFER_OFFSET);
 				num_keys_read += cur_num_keys_read;
 			}
 

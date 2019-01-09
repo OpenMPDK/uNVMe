@@ -288,20 +288,29 @@ static int kv_fio_setup(struct thread_data *td)
 		fprintf(stderr, "unvme2_fio_plugin is built with fio version=%d.%d\n",FIO_MAJOR_VERSION, FIO_MINOR_VERSION);
 		kv_sdk_info();
 
-		assert(engine_option->json_path != NULL);
+		if (engine_option->json_path == NULL) {
+			fprintf(stderr, "Need to specify the path of uNVMe configuration file to option 'json_path'\n");
+			goto err;
+		}
 
 		if (engine_option->key_size < KV_MIN_KEY_LEN || engine_option->key_size > KV_MAX_KEY_LEN) {
 			fprintf(stderr, "keysize(%u) should be between %u and %u.\n", \
 					engine_option->key_size, KV_MIN_KEY_LEN, KV_MAX_KEY_LEN);
+			goto err;
 		}
-		assert((engine_option->key_size >= KV_MIN_KEY_LEN) && (engine_option->key_size <= KV_MAX_KEY_LEN));
 
 		ret = kv_fio_parse_config_file(engine_option->json_path, td);
-		assert(ret == KV_SUCCESS);
+		if (ret != KV_SUCCESS) {
+			fprintf(stderr, "Failed to parse configuration file. Please check the configuration is described properly\n");
+			goto err;
+		}
 
 		g_sdk_opt.app_hugemem_size = kv_fio_calc_hugemem_size(td);
 		ret = kv_sdk_init(KV_SDK_INIT_FROM_STR, &g_sdk_opt);
-		assert(ret == KV_SUCCESS);
+		if (ret != KV_SUCCESS) {
+			fprintf(stderr, "Failed to initialize SDK(ret: 0x%x). Please check the configuration(%s)\n", ret, engine_option->json_path);
+			goto err;
+		}
 
 		kv_fio_set_io_function(td);
 
@@ -351,15 +360,15 @@ static int kv_fio_setup(struct thread_data *td)
 
 		ret = kv_fio_get_dev_info_on_bdf(f->file_name, dev_info);
 		if (ret != KV_SUCCESS) {
-			fprintf(stderr, "Can't find SSD(\"%s\"). Please Check the fio option 'filename' is set properly.\n", f->file_name);
+			fprintf(stderr, "Failed to find the device %s. Please check the option 'filename' is set properly\n", f->file_name);
+			goto err;
 		}
-		assert(ret == KV_SUCCESS);
 
 		f->real_file_size = kv_nvme_get_total_size(dev_info->dev_handle);
 		if (f->real_file_size == KV_ERR_INVALID_VALUE) {
-			fprintf(stderr, "Can't identify the total size of SSD(\"%s\").\n", f->file_name);
+			fprintf(stderr, "Failed to get total size of the device %s\n", f->file_name);
+			goto err;
 		}
-		assert(f->real_file_size != KV_ERR_INVALID_VALUE);
 			
 #if (CHECK_FIO_VERSION(FIO_MAJOR_VERSION, FIO_MINOR_VERSION) >= CHECK_FIO_VERSION(2,18))
 		f->filetype = FIO_TYPE_BLOCK;
@@ -377,8 +386,8 @@ static int kv_fio_setup(struct thread_data *td)
 	fio_thread->core_id = kv_fio_get_core_and_qid_for_io_thread(fio_thread, arr_qid, &num_possible_qid);
 	if (fio_thread->core_id < 0) {
 		fprintf(stderr, "This job can't generate IO workload due to the wrong configuration. \
-				Please check the core_mask options of your device(s)\n");
-		assert(0);
+				Please check the option 'core_mask' of the device(s)\n");
+		goto err;
 	}
 	fio_thread->qid = arr_qid[td->subjob_number % num_possible_qid];
 	//fprintf(stderr, "thread #%u: subjob #%u, core #%d, queue #%d\n", td->thread_number, td->subjob_number, fio_thread->core_id, fio_thread->qid);
@@ -405,6 +414,8 @@ static int kv_fio_setup(struct thread_data *td)
 	pthread_mutex_unlock(&mutex);
 
 	return 0;
+err:
+	return 1;
 }
 
 static int kv_fio_open(struct thread_data *td, struct fio_file *f)
@@ -467,16 +478,14 @@ static int kv_fio_io_u_init(struct thread_data *td, struct io_u *io_u)
 		orig_buffer = td->orig_buffer;
 	}
 	io_u->buf = orig_buffer + (io_u->index * aligned_max_bs);
+	io_u->engine_data = fio_req;
 
 	fio_req->io = io_u;
 	fio_req->fio_thread = fio_thread;
 	fio_req->key_size = fio_thread->key_size;
 	fio_req->key = kv_zalloc(MEM_ALIGN(fio_req->key_size, 4)); //for long key support
-	assert(fio_req->key != NULL);
 
-	io_u->engine_data = fio_req;
-
-	return 0;
+	return fio_req->key == NULL;
 }
 
 static void kv_fio_io_u_free(struct thread_data *td, struct io_u *io_u)

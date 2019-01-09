@@ -178,6 +178,7 @@ struct spdk_bdev_fn_table {
 
 	/** Get an I/O channel for the specific bdev for the calling thread. */
 	struct spdk_io_channel *(*get_io_channel)(void *ctx);
+	struct spdk_io_channel *(*get_io_channel_mq)(void *ctx, uint32_t channel_id);
 
 	/**
 	 * Output driver-specific information to a JSON stream. Optional - may be NULL.

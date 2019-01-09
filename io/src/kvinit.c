@@ -177,8 +177,6 @@ int kv_sdk_load_option(kv_sdk* sdk_opt, char* log_path){ //json parser using SPD
 
 	struct spdk_json_val values[NUM_PARAMS];
 
-	memset(sdk_opt, 0, sizeof(kv_sdk));
-
 	if (log_path == NULL)
 		return KV_ERR_SDK_OPTION_LOAD;
 
@@ -444,17 +442,20 @@ static uint64_t kv_sdk_total_mem_needed(void){
 	return KV_MEM_ALIGN(total_hugemem_size_MB, HUGEPAGE_SIZE / MB);
 }
 
-int _kv_sdk_init(int init_from, void *option, struct spdk_env_opts *spdk_opts){
+int kv_sdk_init(int init_from, void *option){
 	int ret = KV_SUCCESS;
 	char *json_path;
 	uint64_t total_mem_size_MB;
 	kv_sdk *sdk_opt = NULL;
+	char spdk_core_mask[64] = {0};
+	struct spdk_env_opts spdk_opts;
+	spdk_env_opts_init(&spdk_opts);
 
 	pthread_mutex_lock(&g_init_mutex);
 	if(g_kvsdk_ref_count++ > 0){
 		fprintf(stderr, "KV SDK is already initialized\n");
 		pthread_mutex_unlock(&g_init_mutex);
-		return KV_SUCCESS;
+		goto exit;
 	}
 	pthread_mutex_unlock(&g_init_mutex);
 
@@ -485,6 +486,10 @@ int _kv_sdk_init(int init_from, void *option, struct spdk_env_opts *spdk_opts){
 
 	ret = log_init(g_sdk.log_level,g_sdk.log_file);
 	log_debug(KV_LOG_INFO, "[%s] log_init=%d log_level=%d\n",__FUNCTION__,ret, g_sdk.log_level);
+	if (ret != KV_SUCCESS) {
+		fprintf(stderr, "KV Log init failed\n");
+		goto exit;
+	}
 
 	if (g_sdk.slab_size < MIN_TOTAL_SLAB_SIZE) {
 		fprintf(stderr, "SDK: slab_size(%luMB) should be larger than %lluMB, set slab_size to %lluMB\n", g_sdk.slab_size/MB, MIN_TOTAL_SLAB_SIZE/MB, MIN_TOTAL_SLAB_SIZE/MB);
@@ -492,26 +497,38 @@ int _kv_sdk_init(int init_from, void *option, struct spdk_env_opts *spdk_opts){
 	}
 
 	total_mem_size_MB = kv_sdk_total_mem_needed(); //hugemem size for slab, dd init, and user app
-	if (spdk_opts != NULL) {
-		spdk_opts->mem_size = total_mem_size_MB;
-		kv_env_init_with_spdk_opts(spdk_opts);
-	} else { //spdk_opts == NULL
-		kv_env_init(total_mem_size_MB);
+	sprintf(spdk_core_mask, "0x%lX", g_sdk.dd_options[0].core_mask);
+	spdk_opts.mem_size = total_mem_size_MB;
+	spdk_opts.core_mask = spdk_core_mask;
+	spdk_opts.shm_id = getpid();
+
+	ret = kv_env_init_with_spdk_opts(&spdk_opts);
+	if (ret != KV_SUCCESS) {
+		goto exit;
 	}
-	fprintf(stderr, "SDK: total hugemem size=%ldMB\n\n", total_mem_size_MB);
+	fprintf(stderr, "SDK: total hugemem size=%dMB core_mask=%s shm_id=%d\n\n", spdk_opts.mem_size, spdk_opts.core_mask, spdk_opts.shm_id);
 
-	ret |= kvslab_init(g_sdk.slab_size, g_sdk.slab_alloc_policy, g_sdk.nr_ssd);
-
+	ret = kvslab_init(g_sdk.slab_size, g_sdk.slab_alloc_policy, g_sdk.nr_ssd);
 	log_debug(KV_LOG_INFO, "[%s] slab_init=%d log_level=%d\n",__FUNCTION__,ret, g_sdk.slab_alloc_policy);
+	if (ret != KV_SUCCESS) {
+		fprintf(stderr, "KV Slab init failed\n");
+		goto exit;
+	}
 
 	if(g_sdk.use_cache){
-		ret += kv_cache_init();
+		ret = kv_cache_init();
+		if (ret != KV_SUCCESS) {
+			fprintf(stderr, "KV Cache init failed\n");
+			goto exit;
+		}
 	}
 
 	for(int i=0;i<g_sdk.nr_ssd;i++){
 		ret = kv_nvme_init(g_sdk.dev_id[i], &g_sdk.dd_options[i], g_sdk.ssd_type);
 		log_debug(KV_LOG_INFO, "[%s] ret=%d for %s\n",__FUNCTION__, ret, g_sdk.dev_id[i]);
-		assert(ret == 0);
+		if (ret != KV_SUCCESS) {
+			goto exit;
+		}
 		//TODO: run setup.sh
 		//if (ret == KV_ERR_DD_NO_DEVICE){
 		//	fprintf(stderr, "Run setup scripts..\n");
@@ -520,22 +537,18 @@ int _kv_sdk_init(int init_from, void *option, struct spdk_env_opts *spdk_opts){
 		//	assert(ret == 0);
 		//}
 		g_sdk.dev_handle[i] = kv_nvme_open(g_sdk.dev_id[i]);
-		assert(g_sdk.dev_handle[i] != 0);
 		log_debug(KV_LOG_INFO, "[%s] dev_handle[%d]=%ld\n",__FUNCTION__, i, g_sdk.dev_handle[i]);
+		if (!g_sdk.dev_handle[i]) {
+			fprintf(stderr, "Device %d open failed\n", i);
+			goto exit;
+		}
 		if(sdk_opt){
 			sdk_opt->dev_handle[i] = g_sdk.dev_handle[i];
 		}
 	}
 
-	return (ret == KV_SUCCESS) ? (ret) : (KV_ERR_SDK_OPEN);
-}
-
-int kv_sdk_init(int init_from, void *option){
-	return _kv_sdk_init(init_from, option, NULL);
-}
-
-int kv_sdk_init_with_spdk_opts(int init_from, void *option, struct spdk_env_opts *spdk_opts){
-	return _kv_sdk_init(init_from, option, spdk_opts);
+exit:
+	return (ret >= KV_SUCCESS) ? (ret) : (KV_ERR_SDK_OPEN);
 }
 
 int kv_sdk_finalize(){

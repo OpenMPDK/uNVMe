@@ -2,7 +2,7 @@
  "cache": "off",
  "cache_algorithm": "radix",
  "cache_reclaim_policy" : "lru",
- "slab_size" : 24,
+ "slab_size" : 44,
  "slab_alloc_policy" : "huge",
  "ssd_type" : "kv",
  "log_level" : 0,

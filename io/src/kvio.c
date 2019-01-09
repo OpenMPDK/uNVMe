@@ -81,7 +81,7 @@ char *_op_name[5]={"kv_store", "kv_retrieve", "kv_append", "kv_delete", "kv_exis
 
 typedef struct it_readahead{
 	uint32_t iterator;
-	uint8_t readbuf[KV_SSD_MAX_ITERATE_READ_LEN];
+	uint8_t readbuf[KV_ITERATE_READ_BUFFER_SIZE];
 } it_readahead;
 
 int _kv_check_op_param(uint64_t handle, kv_pair* dst, int op_types){
@@ -798,14 +798,9 @@ int _kv_check_iterate_param(uint64_t handle, kv_iterate* it){
                 return KV_ERR_SDK_INVALID_PARAM;
         }
 
-        if((it->kv.value.length > KV_SDK_MAX_ITERATE_READ_LEN)||(it->kv.value.length < KV_SDK_MIN_ITERATE_READ_LEN)){
-                fprintf(stderr, "[%s] iterate_read value length should be from %u to %u (Value length: %u) \n", __FUNCTION__, KV_SDK_MIN_ITERATE_READ_LEN, KV_SDK_MAX_ITERATE_READ_LEN, it->kv.value.length);
+        if(it->kv.value.length != KV_ITERATE_READ_BUFFER_SIZE){
+                fprintf(stderr, "[%s] iterate_read value length should be %u(Value length: %u) \n", __FUNCTION__, KV_ITERATE_READ_BUFFER_SIZE, it->kv.value.length);
                 return KV_ERR_INVALID_VALUE_SIZE;
-        }
-
-        if(it->kv.value.length % KV_ALIGNMENT_UNIT){
-                fprintf(stderr, "[%s] Value length should be multiple of %u (Value length: %u) \n", __FUNCTION__, KV_ALIGNMENT_UNIT, it->kv.value.length);
-                return KV_ERR_MISALIGNED_VALUE_SIZE;
         }
 
 	return KV_SUCCESS;
@@ -850,7 +845,7 @@ static void sdk_async_iterate_read_cb(kv_iterate* it, unsigned int result, unsig
 
 		//can issue further iterate_read request for filling buffer
 		while(remain_read_size > 0){
-			int ssd_it_read_size = KV_SSD_MIN_ITERATE_READ_LEN;
+			int ssd_it_read_size = KV_ITERATE_READ_BUFFER_SIZE;
 			io_it->kv.value.length = ssd_it_read_size;
 			//printf("submit iterate_read: io_it->value.length = %d\n",io_it->value.length);
 			int ret = kv_nvme_iterate_read(handle, io_it);
@@ -941,7 +936,7 @@ int _kv_iterate_read_async(uint64_t handle, kv_iterate* dst){
 		goto err;
 	}
 
-	int ssd_it_read_size = KV_SSD_MIN_ITERATE_READ_LEN;
+	int ssd_it_read_size = KV_ITERATE_READ_BUFFER_SIZE;
 
         kv_iterate* io_it = slab_alloc_iterate(KV_MAX_KEY_LEN+1 ,ssd_it_read_size, did);
         if(!io_it){
@@ -1019,9 +1014,8 @@ int _kv_iterate_read(uint64_t handle, kv_iterate* dst){
 		goto err;
 	}
 
-	//int slab_it_read_size = (dst->value.length < KV_SSD_MIN_ITERATE_READ_LEN) ? KV_SSD_MIN_ITERATE_READ_LEN : dst->value.length;
 	int remain_read_size = dst->kv.value.length;
-	int ssd_it_read_size = KV_SSD_MIN_ITERATE_READ_LEN;
+	int ssd_it_read_size = KV_ITERATE_READ_BUFFER_SIZE;
 
 	/*FIXME: key_length */
         kv_iterate* io_it = slab_alloc_iterate(KV_MAX_KEY_LEN+1, ssd_it_read_size, did);

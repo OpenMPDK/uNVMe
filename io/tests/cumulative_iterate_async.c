@@ -106,7 +106,7 @@ void async_iterate_read_cb(kv_iterate* it, unsigned int result, unsigned int sta
 	pthread_mutex_lock(&g_mutex_eof_flag[stamp->tid]);
 	if (it->kv.value.length > 0) {
 		if(it->kv.key.length == 0) {
-			memcpy(&cur_num_read_key, it->kv.value.value, KV_IT_READ_BUFFER_META_LEN);
+			memcpy(&cur_num_read_key, it->kv.value.value, KV_ITERATE_READ_BUFFER_OFFSET);
 			g_num_read_key[stamp->tid] += cur_num_read_key;
 		} else {
 			g_num_read_key[stamp->tid]++;

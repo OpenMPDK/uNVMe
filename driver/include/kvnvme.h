@@ -111,9 +111,11 @@ typedef struct kv_nvme_cpl {
 
 /**
  * @brief Initializes the underlying uNVMe Driver environment
+ * @return 0 : Success
+ * @return != 0 : Failure
  */
-void kv_env_init(uint32_t process_mem_size_mb);
-void kv_env_init_with_spdk_opts(struct spdk_env_opts* opts);
+int kv_env_init(uint32_t process_mem_size_mb);
+int kv_env_init_with_spdk_opts(struct spdk_env_opts* opts);
 
 /**
  * @brief Initialize a KV NVMe Device

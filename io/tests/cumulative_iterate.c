@@ -225,7 +225,7 @@ void* sdk_iterate(void* data) {
 			g_iterate_read_complete_count[tid]++;
 			if (it[tid]->kv.value.length > 0) {
 				if(it[tid]->kv.key.length == 0) {
-					memcpy(&cur_num_read_key, it[tid]->kv.value.value, KV_IT_READ_BUFFER_META_LEN);
+					memcpy(&cur_num_read_key, it[tid]->kv.value.value, KV_ITERATE_READ_BUFFER_OFFSET);
 					g_num_read_key[tid] += cur_num_read_key;
 				} else {
 					g_num_read_key[tid]++;

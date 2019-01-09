@@ -69,6 +69,7 @@ extern "C" {
 typedef uint64_t spdk_blob_id;
 #define SPDK_BLOBID_INVALID	(uint64_t)-1
 #define SPDK_BLOBSTORE_TYPE_LENGTH 16
+#define MAX_NR_IO_CHANNEL 32
 
 struct spdk_blob_store;
 struct spdk_io_channel;
@@ -99,6 +100,7 @@ struct spdk_bs_dev {
 	/* Create a new channel which is a software construct that is used
 	 * to submit I/O. */
 	struct spdk_io_channel *(*create_channel)(struct spdk_bs_dev *dev);
+	struct spdk_io_channel *(*create_channel_mq)(struct spdk_bs_dev *dev, uint32_t channel_id);
 
 	/* Destroy a previously created channel */
 	void (*destroy_channel)(struct spdk_bs_dev *dev, struct spdk_io_channel *channel);
@@ -528,6 +530,7 @@ void spdk_blob_close(struct spdk_blob *blob, spdk_blob_op_complete cb_fn, void *
  * \return a pointer to the allocated I/O channel.
  */
 struct spdk_io_channel *spdk_bs_alloc_io_channel(struct spdk_blob_store *bs);
+struct spdk_io_channel *spdk_bs_alloc_io_channel_mq(struct spdk_blob_store *bs, int qid);
 
 /**
  * Free the I/O channel.

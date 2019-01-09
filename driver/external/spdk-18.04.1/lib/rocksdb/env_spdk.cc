@@ -519,7 +519,7 @@ void SpdkInitializeThread(void)
 	if (g_fs != NULL) {
 		/* TODO: Add an event lib call to dynamically register a thread */
 		spdk_allocate_thread(_spdk_send_msg, NULL, NULL, NULL, "spdk_rocksdb");
-		g_sync_args.channel = spdk_fs_alloc_io_channel_sync(g_fs);
+		g_sync_args.channel = spdk_fs_alloc_io_channel_sync(g_fs, 0);
 	}
 }
 

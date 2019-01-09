@@ -177,6 +177,7 @@ stub_complete_io(void *io_target, uint32_t num_to_complete)
 
 static struct spdk_bdev_fn_table fn_table = {
 	.get_io_channel =	stub_get_io_channel,
+	.get_io_channel_mq =	NULL,
 	.destruct =		stub_destruct,
 	.submit_request =	stub_submit_request,
 };

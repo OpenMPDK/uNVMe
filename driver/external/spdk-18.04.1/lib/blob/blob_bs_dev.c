@@ -136,6 +136,7 @@ spdk_bs_create_blob_bs_dev(struct spdk_blob *blob)
 			     blob->bs->pages_per_cluster;
 	b->bs_dev.blocklen = SPDK_BS_PAGE_SIZE;
 	b->bs_dev.create_channel = NULL;
+	b->bs_dev.create_channel_mq = NULL;
 	b->bs_dev.destroy_channel = NULL;
 	b->bs_dev.destroy = blob_bs_dev_destroy;
 	b->bs_dev.write = blob_bs_dev_write;

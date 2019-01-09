@@ -53,25 +53,22 @@
 #include <pthread.h>
 
 //Constants
-#define KV_ALIGNMENT_UNIT 64
 #define KV_MIN_VALUE_LEN 0
 #define KV_MAX_IO_VALUE_LEN (2048*1024) //28KB -> 2048KB
 #define LBA_MAX_IO_VALUE_LEN (2048*1024) //2024KB -> 2048KB
-#define KV_MAX_TOTAL_VALUE_LEN (2ull*1024*1024*1024) //2GB
 #define KV_MIN_KEY_LEN 4
 #define KV_MAX_KEY_LEN 255
-#define KV_IT_READ_BUFFER_META_LEN 4
+#define KV_ITERATE_READ_BUFFER_OFFSET 4
 
-#define KV_SDK_MAX_ITERATE_READ_LEN (32*1024) //32KB
-#define KV_SDK_MIN_ITERATE_READ_LEN (32*1024) //32KB
-
-#define KV_SSD_MAX_ITERATE_READ_LEN (32*1024) //32KB
-#define KV_SSD_MIN_ITERATE_READ_LEN (32*1024) //32KB
+#define KV_ITERATE_READ_BUFFER_SIZE (32*1024) //32KB
 #define KV_MAX_ITERATE_HANDLE 16	//maximum 4 handles
 
 #define DEV_ID_LEN 32
 #define NR_MAX_SSD 64
 #define MAX_CPU_CORES 64
+
+#define KV_ERR_INVALID_VALUE (UINT64_MAX)	/**<  error in total size / waf / used size */
+#define KV_INVALID_ITERATE_HANDLE (0)		/**<  error in invalid iterate handle */
 
 //Enum Constants
 /**
@@ -243,8 +240,6 @@ enum kv_result {
         KV_ERR_DECOMPRESSION = 0x302,                           /**<  retrieving uncompressed value with KV_RETRIEVE_DECOMPRESSION option */
 	KV_ERR_IO = 0x303,					/**<  SDK operation error (remained type for compatibility) */
 };		
-#define KV_ERR_INVALID_VALUE (UINT64_MAX)			/**<  error in total size / waf / used size */
-#define KV_INVALID_ITERATE_HANDLE (0)			/**<  error in invalid iterate handle */
 
 //Data Structures
 

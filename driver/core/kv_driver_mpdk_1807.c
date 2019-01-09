@@ -173,19 +173,19 @@ static void kv_nvme_remove_hugepage_info(void){
         remove(info_path);
 }
 
-void _kv_env_init(uint32_t process_mem_size_mb, struct spdk_env_opts* opts){
+int _kv_env_init(uint32_t process_mem_size_mb, struct spdk_env_opts* opts){
         int ret = KV_ERR_DD_INVALID_PARAM;
 
         pthread_mutex_lock(&g_init_mutex);
         if(g_kvdd_ref_count++ > 0){
                 KVNVME_INFO("KV DD is already initialized\n");
                 pthread_mutex_unlock(&g_init_mutex);
-                return;
+                return KV_SUCCESS;
         }
         pthread_mutex_unlock(&g_init_mutex);
 
 	if(opts){
-		spdk_env_init(opts);
+		ret = spdk_env_init(opts);
 		KVNVME_INFO("mem_size_mb: %u shm_id: %u\n",opts->dpdk_mem_size, opts->shm_id);
 	}
 	else{
@@ -194,8 +194,13 @@ void _kv_env_init(uint32_t process_mem_size_mb, struct spdk_env_opts* opts){
 		local_opts.name = "KV_Interface";
 		local_opts.dpdk_mem_size = process_mem_size_mb;
 		local_opts.shm_id = getpid();
-		spdk_env_init(&local_opts);
+		ret = spdk_env_init(&local_opts);
 		KVNVME_INFO("mem_size_mb: %u shm_id: %u\n",local_opts.dpdk_mem_size, local_opts.shm_id);
+	}
+
+	if(ret) {
+		KVNVME_ERR("spdk_env_init failed");
+		return ret;
 	}
 
         KVNVME_INFO("Initialized the KV API Environment");
@@ -208,27 +213,30 @@ void _kv_env_init(uint32_t process_mem_size_mb, struct spdk_env_opts* opts){
                 KVNVME_ERR("Could not Initialize the SPDK Environment");
 
                 LEAVE();
-                return;
+                return ret;
         }
 */
         ret = pthread_create(&g_aer_thread, NULL, (void *)&process_all_nvme_aers_thread, NULL);
 
         if(ret) {
                 KVNVME_ERR("Could not create AERs Processing Thread");
+                return ret;
         }
 
         pthread_setname_np(g_aer_thread, "AERs Processing Thread");
 
         KVNVME_ERR("Done\n");
         LEAVE();
+
+        return ret;
 }
 
-void kv_env_init(uint32_t process_mem_size_mb){
-	_kv_env_init(process_mem_size_mb,NULL);
+int kv_env_init(uint32_t process_mem_size_mb){
+	return _kv_env_init(process_mem_size_mb,NULL);
 }
 
-void kv_env_init_with_spdk_opts(struct spdk_env_opts* opts){
-	_kv_env_init(opts->dpdk_mem_size,opts);
+int kv_env_init_with_spdk_opts(struct spdk_env_opts* opts){
+	return _kv_env_init(opts->dpdk_mem_size,opts);
 }
 
 int kv_nvme_io_queue_type(uint64_t handle, int core_id) {

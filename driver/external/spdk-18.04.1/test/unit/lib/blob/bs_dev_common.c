@@ -47,6 +47,12 @@ dev_create_channel(struct spdk_bs_dev *dev)
 	return &g_io_channel;
 }
 
+static struct spdk_io_channel *
+dev_create_channel_mq(struct spdk_bs_dev *dev, uint32_t channel_id)
+{
+	return &g_io_channel;
+}
+
 static void
 dev_destroy_channel(struct spdk_bs_dev *dev, struct spdk_io_channel *channel)
 {
@@ -193,6 +199,7 @@ init_dev(void)
 	SPDK_CU_ASSERT_FATAL(dev != NULL);
 
 	dev->create_channel = dev_create_channel;
+	dev->create_channel_mq = dev_create_channel_mq;
 	dev->destroy_channel = dev_destroy_channel;
 	dev->destroy = dev_destroy;
 	dev->read = dev_read;

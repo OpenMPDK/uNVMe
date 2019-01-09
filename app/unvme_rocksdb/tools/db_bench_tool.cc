@@ -715,8 +715,13 @@ DEFINE_int32(table_cache_numshardbits, 4, "");
 DEFINE_string(mpdk, "", "Name of MPDK json configuration file");
 DEFINE_string(spdk_bdev, "", "Name of SPDK blockdev to load");
 DEFINE_uint64(spdk_cache_size, 4096, "Size of SPDK filesystem cache (in MB)");
-DEFINE_bool(use_retain_cache, false, "flag to retain blobfs readcache (default: false)");
-DEFINE_bool(use_prefetch_ctl, false, "flag to control prefetch size (default: false)");
+DEFINE_bool(use_retain_cache, false, "flag to retain blobfs readcache");
+DEFINE_bool(use_prefetch_ctl, false, "flag to control prefetch size");
+DEFINE_int32(prefetch_threshold, 128 * 1024, "blobfs prefetch(readahead) threshold");
+DEFINE_bool(use_blobfs_direct_read, false, "flag to use blobfs direct read");
+DEFINE_bool(use_blobfs_direct_write, false, "flag to use blobfs direct write");
+DEFINE_bool(use_manual_schedule_io, false, "If this flag sets, threads of generating KV workloads"
+            " are scheduled in order from core 0. Otherwise, scheduled by kernel automatically");
 
 #ifndef ROCKSDB_LITE
 DEFINE_string(env_uri, "", "URI for registry Env lookup. Mutually exclusive"
@@ -2560,11 +2565,6 @@ void VerifyDBFromDB(std::string& truth_db_name) {
       }
     }
 
-    cpu_set_t cpuset;
-    CPU_ZERO(&cpuset);
-    CPU_SET(thread->tid % (int)sysconf(_SC_NPROCESSORS_ONLN), &cpuset);
-    sched_setaffinity(0, sizeof(cpu_set_t), &cpuset);
-
     SetPerfLevel(static_cast<PerfLevel> (shared->perf_level));
     thread->stats.Start(thread->tid);
     (arg->bm->*(arg->method))(thread);
@@ -2627,6 +2627,16 @@ void VerifyDBFromDB(std::string& truth_db_name) {
       arg[i].thread = new ThreadState(i);
       arg[i].thread->stats.SetReporterAgent(reporter_agent.get());
       arg[i].thread->shared = &shared;
+
+      if(FLAGS_use_manual_schedule_io) {
+        int core_id = (i + 1) % (int)sysconf(_SC_NPROCESSORS_ONLN);
+        if (core_id == 0) core_id = 1;
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        CPU_SET(core_id, &cpuset);
+        sched_setaffinity(0, sizeof(cpu_set_t), &cpuset);
+      }
+
       FLAGS_env->StartThread(ThreadBody, &arg[i]);
     }
 
@@ -5187,7 +5197,7 @@ int db_bench_tool(int argc, char** argv) {
       prefetch_size = FLAGS_block_size;
       fprintf(stderr, "set prefetch_size = %d\n",prefetch_size);
     }
-    FLAGS_env = rocksdb::NewSpdkEnv(rocksdb::Env::Default(), FLAGS_db, FLAGS_mpdk, FLAGS_spdk_bdev, FLAGS_spdk_cache_size, FLAGS_use_retain_cache, prefetch_size);
+    FLAGS_env = rocksdb::NewSpdkEnv(rocksdb::Env::Default(), FLAGS_db, FLAGS_mpdk, FLAGS_spdk_bdev, FLAGS_spdk_cache_size, FLAGS_use_retain_cache, prefetch_size, FLAGS_prefetch_threshold, FLAGS_use_blobfs_direct_read, FLAGS_use_blobfs_direct_write);
     if (FLAGS_env == NULL) {
       fprintf(stderr, "Could not load SPDK blobfs - check that SPDK mkfs was run "
                       "against block device %s.\n", FLAGS_spdk_bdev.c_str());

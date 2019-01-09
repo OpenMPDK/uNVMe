@@ -98,15 +98,15 @@ int validate_iterate_read(uint8_t* key_exist, kv_iterate* it, int key_length, ui
 			goto exit;
 		}
 
-		memcpy(&num_keys, key_buf, KV_IT_READ_BUFFER_META_LEN);
+		memcpy(&num_keys, key_buf, KV_ITERATE_READ_BUFFER_OFFSET);
 
-		key_buf += KV_IT_READ_BUFFER_META_LEN;
+		key_buf += KV_ITERATE_READ_BUFFER_OFFSET;
 		for(int i = 0; i < num_keys; i++){
 			int cur_key_length;
-			memcpy(&cur_key_length, key_buf, KV_IT_READ_BUFFER_META_LEN);
+			memcpy(&cur_key_length, key_buf, KV_ITERATE_READ_BUFFER_OFFSET);
 			assert(cur_key_length == key_length);
 
-			cur_key = key_buf + KV_IT_READ_BUFFER_META_LEN;
+			cur_key = key_buf + KV_ITERATE_READ_BUFFER_OFFSET;
 			assert(memcmp(cur_key, &prefix, PREFIX_LENGTH) == 0);
 			idx = get_key_idx(cur_key);
 			if (key_exist[idx]) {
@@ -115,7 +115,7 @@ int validate_iterate_read(uint8_t* key_exist, kv_iterate* it, int key_length, ui
 			}
 			key_exist[idx]++;
 
-			key_buf += KV_IT_READ_BUFFER_META_LEN + key_length;
+			key_buf += KV_ITERATE_READ_BUFFER_OFFSET + key_length;
 		}
 	}
 exit:
@@ -233,7 +233,7 @@ void test_iterate_open_wrong_condition(uint64_t handle){
         assert(iterator != KV_INVALID_ITERATE_HANDLE);
         //duplicated open
         uint32_t invalid_iterator = kv_iterate_open(handle, keyspace_id, bitmask, prefix, KV_KEY_ITERATE);
-        assert(invalid_iterator == KV_INVALID_ITERATE_HANDLE);
+        assert(invalid_iterator == KV_ERR_ITERATE_HANDLE_ALREADY_OPENED);
 	//invalid iterate type; not working properly
         /*
 	invalid_iterator = kv_iterate_open(handle, bitmask, prefix, 0xFF);
@@ -256,7 +256,7 @@ void test_iterate_read_wrong_condition(uint64_t handle){
 	uint8_t keyspace_id = KV_KEYSPACE_IODATA;
 	uint32_t iterator;
 	int key_length = KEY_LENGTH;
-	int iterate_buffer_size = KV_SSD_MAX_ITERATE_READ_LEN; //32KB
+	int iterate_buffer_size = KV_ITERATE_READ_BUFFER_SIZE; //32KB
 	kv_iterate* it;
 	int ret;
 
@@ -320,7 +320,7 @@ void test_iterate_open_max_handles(uint64_t handle){
         }
 
 	uint32_t tmp_iterator = kv_iterate_open(handle, keyspace_id, bitmask, prefix+1, KV_KEY_ITERATE);
-	assert(tmp_iterator == KV_INVALID_ITERATE_HANDLE);
+	assert(tmp_iterator == KV_ERR_ITERATE_NO_AVAILABLE_HANDLE);
 
         for(uint32_t i = 0; i < KV_MAX_ITERATE_HANDLE; i++){
                 ret = kv_iterate_close(handle, iterator[i]);
@@ -388,7 +388,7 @@ void test_iterate_read(uint64_t handle, uint32_t prefix, int key_length, int val
 
         iterator = kv_iterate_open(handle, keyspace_id, bitmask, prefix, type);
 	assert(iterator != KV_INVALID_ITERATE_HANDLE && iterator <= KV_MAX_ITERATE_HANDLE);
-	iterate_buffer_size = KV_SSD_MAX_ITERATE_READ_LEN; //32KB
+	iterate_buffer_size = KV_ITERATE_READ_BUFFER_SIZE; //32KB
 
         it = (kv_iterate*)malloc(sizeof(kv_iterate));
         assert(it != NULL);

@@ -20,6 +20,8 @@
 #  include <sys/syscall.h>
 #endif
 
+#include <gflags/gflags.h>
+
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
@@ -27,6 +29,13 @@
 #include <stdlib.h>
 #include <thread>
 #include <vector>
+
+using GFLAGS::ParseCommandLineFlags;
+using GFLAGS::RegisterFlagValidator;
+using GFLAGS::SetUsageMessage;
+
+DEFINE_bool(use_manual_schedule_bg, false, "If this flag sets, threads of background flush/compactions"
+            " are scheduled in order from core 0. Otherwise, scheduled by kernel automatically");
 
 namespace rocksdb {
 
@@ -289,11 +298,14 @@ int ThreadPoolImpl::Impl::GetBackgroundThreads() {
 void ThreadPoolImpl::Impl::StartBGThreads() {
   // Start background thread if necessary
   while ((int)bgthreads_.size() < total_threads_limit_) {
-
-    cpu_set_t cpuset;
-    CPU_ZERO(&cpuset);
-    CPU_SET(((int)bgthreads_.size()) % (int)sysconf(_SC_NPROCESSORS_ONLN), &cpuset);
-    sched_setaffinity(0, sizeof(cpu_set_t), &cpuset);
+    if (FLAGS_use_manual_schedule_bg) {
+      int core_id = ((int)bgthreads_.size() + 1) % (int)sysconf(_SC_NPROCESSORS_ONLN);
+      if (core_id == 0) core_id =1;
+      cpu_set_t cpuset;
+      CPU_ZERO(&cpuset);
+      CPU_SET(core_id, &cpuset);
+      sched_setaffinity(0, sizeof(cpu_set_t), &cpuset);
+    }
 
     port::Thread p_t(&BGThreadWrapper,
       new BGThreadMetadata(this, bgthreads_.size()));

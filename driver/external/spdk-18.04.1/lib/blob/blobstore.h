@@ -153,12 +153,14 @@ struct spdk_blob_store {
 	uint64_t			md_start; /* Offset from beginning of disk, in pages */
 	uint32_t			md_len; /* Count, in pages */
 
+
 	struct spdk_io_channel		*md_channel;
 	uint32_t			max_channel_ops;
 
 	struct spdk_thread		*md_thread;
 
 	struct spdk_bs_dev		*dev;
+	struct spdk_io_channel		*bs_channel_mq[MAX_NR_IO_CHANNEL];
 
 	struct spdk_bit_array		*used_md_pages;
 	struct spdk_bit_array		*used_clusters;
@@ -190,6 +192,8 @@ struct spdk_bs_channel {
 
 	struct spdk_bs_dev		*dev;
 	struct spdk_io_channel		*dev_channel;
+
+	pthread_spinlock_t		lock;
 
 	TAILQ_HEAD(, spdk_bs_request_set) need_cluster_alloc;
 };

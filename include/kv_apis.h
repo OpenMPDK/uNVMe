@@ -59,16 +59,6 @@ extern "C" {
 int kv_sdk_init(int init_from, void *option);
 
 /**
- * @brief Initializes KV SSD and KV cache with spdk_env_opts structure
- * @param init_from types of initializing SDK
- * @param option configuration file's path or pointer of config structure
- * @param spdk_opts spdk config structure
- * @return KV_SUCCESS
- * @return KV_ERR_SDK_OPEN
- */
-int kv_sdk_init_with_spdk_opts(int init_from, void *option, struct spdk_env_opts *spdk_opts);
-
-/**
  * @brief  Load init option from file(json) or in-memory configuration
  * @return KV_SUCCESS
  * @return KV_ERR_SDK_OPTION_LOAD

@@ -155,7 +155,7 @@ struct kvsl_slabinfo {
 };
 
 
-KVSLAB_TAILQ_HEAD(kvsl_slabhinfo, kvsl_slabinfo);	/*make slab head info structure(which has */
+KVSLAB_TAILQ_HEAD(kvsl_slabhinfo, kvsl_slabinfo);	/* make slab head info structure */
 
 
 struct kvsl_slabclass {

@@ -47,6 +47,12 @@ extern "C" {
 #endif
 
 #define SPDK_FILE_NAME_MAX	255
+#define BLOBFS_BUFFERED_READ	(0x0)
+#define BLOBFS_BUFFERED_WRITE	(0x0)
+#define BLOBFS_DIRECT_READ	(0x1)
+#define BLOBFS_DIRECT_WRITE	(0x2)
+#define BLOBFS_BUFFERED_IO	(BLOBFS_BUFFERED_READ | BLOBFS_BUFFERED_WRITE)
+#define BLOBFS_DIRECT_IO	(BLOBFS_DIRECT_READ | BLOBFS_DIRECT_WRITE)
 
 struct spdk_file;
 struct spdk_filesystem;
@@ -72,6 +78,7 @@ typedef void (*spdk_file_stat_op_complete)(void *ctx, struct spdk_file_stat *sta
 
 typedef void (*fs_request_fn)(void *);
 typedef void (*fs_send_request_fn)(fs_request_fn, void *);
+typedef void (*fs_send_request_mq_fn)(fs_request_fn, void *, int);
 
 /**
  * Initialize a spdk_blobfs_opts structure to the default option values.
@@ -139,7 +146,7 @@ struct spdk_io_channel *spdk_fs_alloc_io_channel(struct spdk_filesystem *fs);
  *
  * \return a pointer to the I/O channel on success or NULL otherwise.
  */
-struct spdk_io_channel *spdk_fs_alloc_io_channel_sync(struct spdk_filesystem *fs);
+struct spdk_io_channel *spdk_fs_alloc_io_channel_sync(struct spdk_filesystem *fs, int qid);
 
 /**
  * Free I/O channel.
@@ -202,6 +209,8 @@ int spdk_fs_open_file(struct spdk_filesystem *fs, struct spdk_io_channel *channe
  * \return 0 on success, negative errno on failure.
  */
 int spdk_file_close(struct spdk_file *file, struct spdk_io_channel *channel);
+void set_fs_channel_send_request_fn(struct spdk_io_channel *channel, fs_send_request_fn fn);
+void set_fs_set_send_request_mq_fn(struct spdk_filesystem *fs, fs_send_request_mq_fn fn) ;
 
 /**
  * Change the file name.
@@ -230,6 +239,7 @@ int spdk_fs_rename_file(struct spdk_filesystem *fs, struct spdk_io_channel *chan
  */
 int spdk_fs_delete_file(struct spdk_filesystem *fs, struct spdk_io_channel *channel,
 			const char *name);
+void spdk_file_cache_free(struct spdk_file *file);
 
 /**
  * Get the first file in the blobstore filesystem.
@@ -306,6 +316,8 @@ int spdk_file_write(struct spdk_file *file, struct spdk_io_channel *channel,
  */
 int64_t spdk_file_read(struct spdk_file *file, struct spdk_io_channel *channel,
 		       void *payload, uint64_t offset, uint64_t length);
+int64_t spdk_file_read_mq(struct spdk_file *file, struct spdk_io_channel *channel,
+		       void *payload, uint64_t offset, uint64_t length);
 
 /**
  * Set cache size for the blobstore filesystem.
@@ -354,11 +366,22 @@ void spdk_file_set_retain_cache(struct spdk_file *file, bool retain);
 bool spdk_file_get_retain_cache(struct spdk_file *file);
 
 /*
-*  set/get readhead size (default = 256*2 KB)
+*  set/get readahead size (default = 256*2 KB)
 */
 void spdk_file_set_prefetch_size(struct spdk_file *file, int size);
 int spdk_file_get_prefetch_size(struct spdk_file* file);
 
+/*
+* set/get readahead threshold (default = 128 KB)
+*/
+void spdk_file_set_prefetch_threshold(struct spdk_file *file, int size);
+int spdk_file_get_prefetch_threshold(struct spdk_file *file);
+
+/*
+*  set/get direct_io (default = buffered IO)
+*/
+void spdk_file_set_direct_io(struct spdk_file *file, uint32_t direct_io);
+uint32_t spdk_file_get_direct_io(struct spdk_file *file);
 
 #ifdef __cplusplus
 }
