@@ -34,19 +34,19 @@ static_object = env_with_err.StaticLibrary(kv_io, ['src/kvradix.c', 'src/kvsdk.c
 
 radix_perf = env_with_err.Program('radix_perf',
             ['tests/radix_perf.c'],
-            LIBS=["check", kv_io, 'm'],
+            LIBS=["check", kv_io, 'm', 'pthread', 'rt', 'subunit'],
             LIBPATH = lib_path)
 Default(static_object, radix_perf)
 
 alloc_perf = env_with_err.Program('alloc_perf',
             ['tests/alloc_perf.c'],
-            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl', 'numa'],
+            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl', 'numa', 'subunit'],
             LIBPATH = lib_path)
 Default(static_object, alloc_perf)
 
 alloc_udd_perf = env_with_err.Program('alloc_udd_perf',
             ['tests/alloc_udd_perf.c'],
-            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl', 'numa', 'uuid'],
+            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl', 'numa', 'uuid', 'subunit'],
             LIBPATH = lib_path)
 Default(static_object, alloc_udd_perf)
 
@@ -89,7 +89,7 @@ Default(static_object, sdk_perf_async)
 
 sdk_exist_append_iterate_getlog = env_with_err.Program('sdk_exist_append_iterate_getlog',
             ['tests/sdk_exist_append_iterate_getlog.c'],
-            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl', 'numa', 'uuid'],
+            LIBS=["check", kv_io, 'kvnvmedd','m','pthread', 'rt', 'dl', 'numa', 'uuid', 'subunit'],
             LIBPATH = lib_path)
 Default(static_object, sdk_exist_append_iterate_getlog)
 
