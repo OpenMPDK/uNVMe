@@ -123,7 +123,7 @@ int kv_env_init_with_spdk_opts(struct spdk_env_opts* opts);
  * @param options Pointer to a KV UDD I/O options structure
  * @param ssd_type LBA Type SSD (0) or KV Type SSD (1)
  * @return 0 : Success
- * @return < 0: Failure
+ * @return != 0: Failure
  */
 int kv_nvme_init(const char *bdf, kv_nvme_io_options *options, unsigned int ssd_type);
 
@@ -165,7 +165,7 @@ int kv_nvme_get_log_page(uint64_t handle, uint8_t log_id, void* buffer, uint32_t
  * @param core_id CPU Core ID of the current executing I/O thread
  * @return 1 : Sync I/O Queue
  * @return 2 : Async I/O Queue
- * @return < 0: Invalid I/O Queue ID for the corresponding CPU Core ID
+ * @return other values: Invalid I/O Queue ID for the corresponding CPU Core ID
  */
 int kv_nvme_io_queue_type(uint64_t handle, int core_id);
 
@@ -211,7 +211,7 @@ uint16_t kv_nvme_decrease_current_qd(uint64_t handle, int core_id);
  * @param aer_cb_fn Pointer to the AER Callback Function
  * @param aer_cb_arg Parameter to the AER Callback Function
  * @return 0 : Success
- * @return < 0: Failure
+ * @return != 0: Failure
  */
 int kv_nvme_register_aer_callback(uint64_t handle, kv_aer_cb_fn_t aer_cb_fn, void *aer_cb_arg);
 
@@ -326,8 +326,8 @@ int kv_nvme_exist_async(uint64_t handle, int qid, const kv_pair *kv_pair);
  * @param prefix  key prefix of matching key set
  * @param iterate_type  one of four types (key-only, key-value, key-only with delete, key-value with delete )
  * @param result result buffer containing results
- * @return > 0 : iterator id opened
- * @return = UINT8_MAX: fail to open iterator
+ * @return 1 ~ 16 : iterator id opened
+ * @return other values: fail to open iterator
  */
 uint32_t kv_nvme_iterate_open(uint64_t handle, const uint8_t keyspace_id, const uint32_t bitmask, const uint32_t prefix, const uint8_t iterate_type);
 
@@ -401,7 +401,7 @@ uint64_t kv_nvme_get_used_size(uint64_t handle);
  * @brief Close a KV NVMe Device
  * @param handle Handle to the KV NVMe Device
  * @return 0: Success
- * @return < 0: Failure
+ * @return != 0: Failure
  */
 int kv_nvme_close(uint64_t handle);
 
@@ -409,7 +409,7 @@ int kv_nvme_close(uint64_t handle);
  * @brief De-Initialize a KV NVMe Device
  * @param bdf BDF of the device in a string format. Example: "0000:01:00.0"
  * @return 0 : Success
- * @return < 0: Failure
+ * @return != 0: Failure
  */
 int kv_nvme_finalize(char *bdf);
 

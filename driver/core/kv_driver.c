@@ -88,7 +88,6 @@ static void attach_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid, s
 
         nvme->ctrlr = ctrlr;
         nvme->num_io_queues = opts->num_io_queues;
-
         TAILQ_INSERT_TAIL(&g_nvme_devices, nvme, tailq);
 
         LEAVE();
@@ -149,7 +148,6 @@ static void process_all_nvme_aers_thread(void *arg) {
                                 }
                         }
                 }
-
                 sleep(1);
         }
 }
@@ -257,7 +255,9 @@ int kv_env_init(uint32_t process_mem_size_mb){
 }
 
 int kv_env_init_with_spdk_opts(struct spdk_env_opts* opts){
-	return _kv_env_init(opts->mem_size,opts);
+  if (opts == NULL)
+    return KV_ERR_DD_INVALID_PARAM;
+  return _kv_env_init(opts->mem_size,opts);
 }
 
 int kv_nvme_io_queue_type(uint64_t handle, int core_id) {
@@ -273,8 +273,18 @@ int kv_nvme_io_queue_type(uint64_t handle, int core_id) {
                 return ret;
         }
 
-        nvme = (kv_nvme_t *)handle;
+        TAILQ_FOREACH(nvme, &g_nvme_devices, tailq) {
+          if((uint64_t)nvme == handle) {
+            break;
+          }
+        }
+        if((uint64_t)nvme != handle) {
+          KVNVME_ERR("Could not Find a Matching NVMe Device");
+          LEAVE();
+          return ret;
+        }
 
+        nvme = (kv_nvme_t *)handle;
         if(core_id < 0) {
                 KVNVME_ERR("Invalid I/O Queue ID passed");
 
@@ -325,6 +335,19 @@ int kv_nvme_register_aer_callback(uint64_t handle, kv_aer_cb_fn_t aer_cb_fn, voi
         return 0;
 }
 
+int _check_ssd_type(unsigned int ssd_type) {
+  int ret = KV_SUCCESS;
+  switch(ssd_type) {
+  case KV_TYPE_SSD:
+  case LBA_TYPE_SSD:
+    ret = KV_SUCCESS;
+    break;
+  default:
+    ret = KV_ERR_DD_UNSUPPORTED_CMD;
+    break;
+  }
+  return ret;
+}
 
 int kv_nvme_init(const char *bdf, kv_nvme_io_options *options, unsigned int ssd_type) {
         int ret = KV_ERR_DD_INVALID_PARAM, num_ns = 0;
@@ -336,9 +359,19 @@ int kv_nvme_init(const char *bdf, kv_nvme_io_options *options, unsigned int ssd_
         unsigned int *queues_per_thread = NULL;
 
         ENTER();
+        if (bdf == NULL || options == NULL ) {
+          KVNVME_ERR("Use invalid parameter to initialize the KV NVMe Device");
+          LEAVE();
+          return ret;
+        }
+
+        if (_check_ssd_type(ssd_type)) {
+          KVNVME_ERR("Unsupported ssd type: 0x%x inputted.", ssd_type);
+          LEAVE();
+          return KV_ERR_DD_UNSUPPORTED_CMD;
+        }
 
         nvme = calloc(1, sizeof(kv_nvme_t));
-
         if(!nvme) {
                 KVNVME_ERR("Could not allocate memory for a KV NVMe Device Handle");
 
@@ -346,7 +379,13 @@ int kv_nvme_init(const char *bdf, kv_nvme_io_options *options, unsigned int ssd_
                 return KV_ERR_DD_NO_AVAILABLE_RESOURCE;
         }
 
-        nvme->options = options;
+        nvme->options = calloc(1, sizeof(kv_nvme_io_options));
+        if(!nvme->options) {
+                KVNVME_ERR("Could not allocate memory for a NVMe Device option");
+                LEAVE();
+                return KV_ERR_DD_NO_AVAILABLE_RESOURCE;
+        }
+        memcpy(nvme->options, options, sizeof(kv_nvme_io_options));
 
         strncpy(kv_nvme_traddr, TRANSPORT_ID_STRING, TRANSPORT_ID_STRING_LEN);
         strncpy(kv_nvme_traddr + TRANSPORT_ID_STRING_LEN, bdf, BDF_STRING_LEN);
@@ -842,19 +881,26 @@ uint64_t kv_nvme_open(const char *bdf) {
 }
 
 int kv_nvme_close(uint64_t handle) {
-        int ret = KV_ERR_DD_INVALID_PARAM;
+  ENTER();
 
-        ENTER();
+  if(!handle) {
+    KVNVME_ERR("Invalid handle passed");
+    LEAVE();
+    return KV_ERR_DD_INVALID_PARAM;
+  }
 
-        if(!handle) {
-                KVNVME_ERR("Invalid handle passed");
+  kv_nvme_t *nvme = NULL;
+  TAILQ_FOREACH(nvme, &g_nvme_devices, tailq) {
+    if((uint64_t)nvme == handle) {
+      KVNVME_DEBUG("Found the Matching NVMe Device");
+      LEAVE();
+      return KV_SUCCESS;
+    }
+  }
+  KVNVME_ERR("Could not Find a Matching NVMe Device");
 
-                LEAVE();
-                return ret;
-        }
-
-        LEAVE();
-        return 0;
+  LEAVE();
+  return KV_ERR_DD_NO_DEVICE;
 }
 
 int kv_nvme_finalize(char *bdf) {
@@ -874,12 +920,11 @@ int kv_nvme_finalize(char *bdf) {
         }
 
         nvme = get_kv_nvme_from_bdf(bdf);
-
         if(!nvme) {
                 KVNVME_ERR("Could not get a Matching KV NVMe Device for the passed BDF");
 
                 LEAVE();
-                return ret;
+                return KV_ERR_DD_NO_DEVICE;
         }
 
         if(nvme->num_cq_threads == 1) {
@@ -907,9 +952,9 @@ int kv_nvme_finalize(char *bdf) {
         free(nvme->io_queue_type);
         free(nvme->async_qpairs);
         free(nvme->qpairs);
+        free(nvme->options);
 
         ret = spdk_nvme_detach(nvme->ctrlr);
-
         if(ret) {
                 KVNVME_ERR("Could not detach the KV NVMe Device from the Driver");
 
@@ -939,6 +984,10 @@ void kv_nvme_process_completion(uint64_t handle){
         unsigned int queue_is_async = 0;
         unsigned int queue_id = 0;
 
+        if (nvme == NULL) {
+          KVNVME_ERR("Invalid handle passed");
+          return;
+        }
         for(queue_id = 0; queue_id < MAX_CPU_CORES; queue_id++) {
                 qpair = nvme->qpairs[queue_id];
                 queue_is_async = ((nvme->io_queue_type[queue_id] == ASYNC_IO_QUEUE) ? 1 : 0);
@@ -957,7 +1006,19 @@ void kv_nvme_process_completion_queue(uint64_t handle, uint32_t queue_id){
         kv_nvme_t *nvme = (kv_nvme_t*)handle;
         struct spdk_nvme_qpair *qpair = NULL;
         unsigned int queue_is_async = 0;
-
+  if (nvme == NULL) {
+    KVNVME_ERR("Invalid handle passed");
+    return;
+  }
+  if(queue_id >= MAX_CPU_CORES) {
+    int qid = sched_getcpu();
+    if(qid >= 0) {
+      queue_id = qid;
+    } else {
+      KVNVME_WARN("Could not get the CPU Core ID, Using Default 0");
+      queue_id = 0;
+    }
+  }
 	qpair = nvme->qpairs[queue_id];
 	queue_is_async = ((nvme->io_queue_type[queue_id] == ASYNC_IO_QUEUE) ? 1 : 0);
 	if(qpair && queue_is_async) {

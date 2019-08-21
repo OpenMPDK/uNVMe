@@ -27,6 +27,8 @@ if [ -s /etc/redhat-release ]; then
 
 elif [ -f /etc/debian_version ]; then
 	# Includes Ubuntu, Debian
+	# Retrieve new lists of packages
+	apt-get update
 	apt-get install -y gcc g++ make libcunit1-dev libaio-dev libssl-dev \
 		git astyle pep8 lcov clang uuid-dev sg3-utils libiscsi-dev libgflags-dev
 	# Additional dependencies for NVMe over Fabrics

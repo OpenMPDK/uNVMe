@@ -67,6 +67,9 @@
 #define NR_MAX_SSD 64
 #define MAX_CPU_CORES 64
 
+// can be on any socket
+#define SOCKET_ID_ANY (-1)
+
 #define KV_ERR_INVALID_VALUE (UINT64_MAX)	/**<  error in total size / waf / used size */
 #define KV_INVALID_ITERATE_HANDLE (0)		/**<  error in invalid iterate handle */
 
@@ -224,6 +227,8 @@ enum kv_result {
 	KV_ERR_DD_NO_AVAILABLE_RESOURCE = 0x103,
 	KV_ERR_DD_NO_AVAILABLE_QUEUE = 0x104,
 	KV_ERR_DD_UNSUPPORTED_CMD = 0x105,
+  KV_ERR_DD_ITERATE_COND_INVALID = 0x106,  /**<  iterator condition is not valid */
+
 
         //0x200 ~ 0x2FF for SDK Error
         KV_ERR_SDK_OPEN = 0x200,                                /**<  device(sdk) open failed */

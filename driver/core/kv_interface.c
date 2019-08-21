@@ -37,6 +37,40 @@
 #include "kv_cmd.h"
 #include "lba_cmd.h"
 
+/*!Check wether the iterator bitmask is valid 
+ * \desc:  bitmask should be set from the first bit of a key and it is not 
+ *            allowed setting bitmask from a middle position of a key. Hence, 
+  *           Setting bitmask / prefix as 0xFF/0x0F is allowed while 0x0F/0x0F
+ *             is not allowed.
+ * \return bool : if input is valid bitmask return true, else return false
+ */
+inline bool _is_valid_bitmask(uint32_t bitmask){
+  const uint32_t BITMASK_LEN = 32;
+  //scan prefix bits whose value is 1; scan order: from high bits to low bits
+  uint32_t cnt = 0;
+  uint32_t bit_idx = 0;
+  while(cnt < BITMASK_LEN){
+    bit_idx = BITMASK_LEN - cnt - 1;
+    if(!(bitmask & (1<<bit_idx)))
+      break;
+    cnt++;
+  }
+
+  //scan remain bits, if has bits whose value is 1, return false, else return true;
+  if(cnt == BITMASK_LEN)
+    return true;
+
+  cnt++;
+  while(cnt < BITMASK_LEN){
+    bit_idx = BITMASK_LEN - cnt - 1;
+    if(bitmask & (1<<bit_idx))
+      return false;
+    cnt++;
+  }
+
+  return true;
+};
+
 static void admin_complete(void *arg, const struct spdk_nvme_cpl *completion) {
 	nvme_cmd_sequence_t *admin_sequence = NULL;
 
@@ -189,7 +223,6 @@ int kv_nvme_append(uint64_t handle, int qid, kv_pair *kv) {
 	}
 
 	nvme = (kv_nvme_t *)handle;
-
 	if(qid < 0){
 		qid = sched_getcpu();
 		if(qid < 0) {
@@ -197,6 +230,11 @@ int kv_nvme_append(uint64_t handle, int qid, kv_pair *kv) {
 			qid = 0;
 		}
 	}
+  if(qid >= MAX_CPU_CORES || !nvme->io_queue_type[qid]) {
+    KVNVME_ERR("Invalid qid: %d passed", qid);
+    LEAVE();
+    return ret;
+  }
 
 	queue_is_async = ((nvme->io_queue_type[qid] == ASYNC_IO_QUEUE) ? 1 : 0);
 	if(queue_is_async) {
@@ -228,7 +266,6 @@ int kv_nvme_write(uint64_t handle, int qid, kv_pair *kv) {
 	}
 
 	nvme = (kv_nvme_t *)handle;
-
 	if(qid < 0){
 		qid = sched_getcpu();
 		if(qid < 0) {
@@ -236,6 +273,11 @@ int kv_nvme_write(uint64_t handle, int qid, kv_pair *kv) {
 			qid = 0;
 		}
 	}
+  if(qid >= MAX_CPU_CORES || !nvme->io_queue_type[qid]) {
+    KVNVME_ERR("Invalid qid: %d passed", qid);
+    LEAVE();
+    return ret;
+  }
 
 	queue_is_async = ((nvme->io_queue_type[qid] == ASYNC_IO_QUEUE) ? 1 : 0);
 	if(queue_is_async) {
@@ -268,7 +310,6 @@ int kv_nvme_write_async(uint64_t handle, int qid, kv_pair *kv) {
 	}
 
 	nvme = (kv_nvme_t *)handle;
-
 	if(qid < 0){
 		qid = sched_getcpu();
 		if(qid < 0) {
@@ -276,6 +317,11 @@ int kv_nvme_write_async(uint64_t handle, int qid, kv_pair *kv) {
 			qid = 0;
 		}
 	}
+  if(qid >= MAX_CPU_CORES || !nvme->io_queue_type[qid]) {
+    KVNVME_ERR("Invalid qid: %d passed", qid);
+    LEAVE();
+    return ret;
+  }
 
 	queue_is_sync = ((nvme->io_queue_type[qid] == SYNC_IO_QUEUE) ? 1 : 0);
 	if(queue_is_sync) {
@@ -306,7 +352,6 @@ int kv_nvme_read(uint64_t handle, int qid, kv_pair *kv) {
 	}
 
 	nvme = (kv_nvme_t *)handle;
-
 	if(qid < 0){
 		qid = sched_getcpu();
 		if(qid < 0) {
@@ -314,6 +359,11 @@ int kv_nvme_read(uint64_t handle, int qid, kv_pair *kv) {
 			qid = 0;
 		}
 	}
+  if(qid >= MAX_CPU_CORES || !nvme->io_queue_type[qid]) {
+    KVNVME_ERR("Invalid qid: %d passed", qid);
+    LEAVE();
+    return ret;
+  }
 
 	queue_is_async = ((nvme->io_queue_type[qid] == ASYNC_IO_QUEUE) ? 1 : 0);
 	if(queue_is_async) {
@@ -344,7 +394,6 @@ int kv_nvme_read_async(uint64_t handle, int qid, kv_pair *kv) {
 	}
 
 	nvme = (kv_nvme_t *)handle;
-
 	if(qid < 0){
 		qid = sched_getcpu();
 		if(qid < 0) {
@@ -352,6 +401,11 @@ int kv_nvme_read_async(uint64_t handle, int qid, kv_pair *kv) {
 			qid = 0;
 		}
 	}
+  if(qid >= MAX_CPU_CORES || !nvme->io_queue_type[qid]) {
+    KVNVME_ERR("Invalid qid: %d passed", qid);
+    LEAVE();
+    return ret;
+  }
 
 	queue_is_sync = ((nvme->io_queue_type[qid] == SYNC_IO_QUEUE) ? 1 : 0);
 	if(queue_is_sync) {
@@ -382,7 +436,6 @@ int kv_nvme_delete(uint64_t handle, int qid, const kv_pair *kv) {
 	}
 
 	nvme = (kv_nvme_t *)handle;
-
 	if(qid < 0){
 		qid = sched_getcpu();
 		if(qid < 0) {
@@ -390,6 +443,11 @@ int kv_nvme_delete(uint64_t handle, int qid, const kv_pair *kv) {
 			qid = 0;
 		}
 	}
+  if(qid >= MAX_CPU_CORES || !nvme->io_queue_type[qid]) {
+    KVNVME_ERR("Invalid qid: %d passed", qid);
+    LEAVE();
+    return ret;
+  }
 
 	queue_is_async = ((nvme->io_queue_type[qid] == ASYNC_IO_QUEUE) ? 1 : 0);
 	if(queue_is_async) {
@@ -426,7 +484,6 @@ int kv_nvme_delete_async(uint64_t handle, int qid, const kv_pair *kv) {
 	}
 
 	nvme = (kv_nvme_t *)handle;
-
 	if(qid < 0){
 		qid = sched_getcpu();
 		if(qid < 0) {
@@ -434,6 +491,11 @@ int kv_nvme_delete_async(uint64_t handle, int qid, const kv_pair *kv) {
 			qid = 0;
 		}
 	}
+  if(qid >= MAX_CPU_CORES || !nvme->io_queue_type[qid]) {
+    KVNVME_ERR("Invalid qid: %d passed", qid);
+    LEAVE();
+    return ret;
+  }
 
 	queue_is_sync = ((nvme->io_queue_type[qid] == SYNC_IO_QUEUE) ? 1 : 0);
 	if(queue_is_sync) {
@@ -470,7 +532,6 @@ int kv_nvme_exist(uint64_t handle, int qid, const kv_pair* kv) {
 	}
 
 	nvme = (kv_nvme_t *)handle;
-
 	if(qid < 0){
 		qid = sched_getcpu();
 		if(qid < 0) {
@@ -478,6 +539,11 @@ int kv_nvme_exist(uint64_t handle, int qid, const kv_pair* kv) {
 			qid = 0;
 		}
 	}
+  if(qid >= MAX_CPU_CORES || !nvme->io_queue_type[qid]) {
+    KVNVME_ERR("Invalid qid: %d passed", qid);
+    LEAVE();
+    return ret;
+  }
 
 	queue_is_async = ((nvme->io_queue_type[qid] == ASYNC_IO_QUEUE) ? 1 : 0);
 	if(queue_is_async) {
@@ -514,7 +580,6 @@ int kv_nvme_exist_async(uint64_t handle, int qid, const kv_pair* kv) {
 	}
 
 	nvme = (kv_nvme_t *)handle;
-
 	if(qid < 0){
 		qid = sched_getcpu();
 		if(qid < 0) {
@@ -522,6 +587,11 @@ int kv_nvme_exist_async(uint64_t handle, int qid, const kv_pair* kv) {
 			qid = 0;
 		}
 	}
+  if(qid >= MAX_CPU_CORES || !nvme->io_queue_type[qid]) {
+    KVNVME_ERR("Invalid qid: %d passed", qid);
+    LEAVE();
+    return ret;
+  }
 
 	queue_is_sync = ((nvme->io_queue_type[qid] == SYNC_IO_QUEUE) ? 1 : 0);
 	if(queue_is_sync) {
@@ -551,6 +621,11 @@ uint32_t kv_nvme_iterate_open(uint64_t handle, uint8_t keyspace_id, uint32_t bit
 
 	ENTER();
 
+  if(!_is_valid_bitmask(bitmask)) {
+    KVNVME_ERR("Invalid bitmask inputted.");
+    LEAVE();
+    return KV_ERR_DD_ITERATE_COND_INVALID;
+  }
 	if(!handle){
 		KVNVME_ERR("Invalid handle passed");
 		LEAVE();
@@ -633,7 +708,6 @@ int kv_nvme_iterate_read(uint64_t handle, int qid, kv_iterate* it){
 	}
 
 	nvme = (kv_nvme_t *)handle;
-
 	if(qid < 0){
 		qid = sched_getcpu();
 		if(qid < 0) {
@@ -641,6 +715,11 @@ int kv_nvme_iterate_read(uint64_t handle, int qid, kv_iterate* it){
 			qid = 0;
 		}
 	}
+  if(qid >= MAX_CPU_CORES || !nvme->io_queue_type[qid]) {
+    KVNVME_ERR("Invalid qid: %d passed", qid);
+    LEAVE();
+    return ret;
+  }
 
 	queue_is_async = ((nvme->io_queue_type[qid] == ASYNC_IO_QUEUE) ? 1 : 0);
 	if(queue_is_async) {
@@ -671,7 +750,6 @@ int kv_nvme_iterate_read_async(uint64_t handle, int qid, kv_iterate* it) {
 	}
 
 	nvme = (kv_nvme_t *)handle;
-
 	if(qid < 0){
 		qid = sched_getcpu();
 		if(qid < 0) {
@@ -679,6 +757,11 @@ int kv_nvme_iterate_read_async(uint64_t handle, int qid, kv_iterate* it) {
 			qid = 0;
 		}
 	}
+  if(qid >= MAX_CPU_CORES || !nvme->io_queue_type[qid]) {
+    KVNVME_ERR("Invalid qid: %d passed", qid);
+    LEAVE();
+    return ret;
+  }
 
 	queue_is_sync = ((nvme->io_queue_type[qid] == SYNC_IO_QUEUE) ? 1 : 0);
 	if(queue_is_sync) {
@@ -717,7 +800,7 @@ int kv_nvme_format(uint64_t handle, int erase_user_data){
 
 uint64_t kv_nvme_get_total_size(uint64_t handle) {
 	uint32_t sector_size = 0;
-	uint64_t total_size = KV_ERR_INVALID_VALUE;
+	uint64_t total_size = 0;
 	kv_nvme_t *nvme = NULL;
 	const struct spdk_nvme_ns_data *ns_data = NULL;
 
@@ -759,7 +842,7 @@ uint64_t kv_nvme_get_total_size(uint64_t handle) {
 }
 
 uint64_t kv_nvme_get_used_size(uint64_t handle) {
-	uint64_t used_size = KV_ERR_INVALID_VALUE;
+	uint64_t used_size = 0;
 	kv_nvme_t *nvme = NULL;
 
 	ENTER();
@@ -848,7 +931,7 @@ int kv_nvme_get_log_page(uint64_t handle, uint8_t log_id, void* buffer, uint32_t
 uint64_t kv_nvme_get_waf(uint64_t handle) {
 	int ret = KV_ERR_DD_INVALID_PARAM;
 	uint64_t waf = KV_ERR_INVALID_VALUE;
-	void* log_buffer = NULL;
+	char* log_buffer = NULL;
 
 	ENTER();
 
@@ -868,7 +951,7 @@ uint64_t kv_nvme_get_waf(uint64_t handle) {
 
 	ret = kv_nvme_get_log_page(handle, VENDOR_LOG_ID, log_buffer,  VENDOR_LOG_SIZE);
 	if(ret == KV_SUCCESS){
-		waf = *(uint32_t*)log_buffer;
+		waf = *((uint32_t *)&log_buffer[256]);
 	}
 
 	kv_free(log_buffer);

@@ -33,6 +33,7 @@
 
 #include "spdk/likely.h"
 #include "spdk/util.h"
+#include <math.h>
 #include "kv_driver.h"
 #include "kv_cmd.h"
 
@@ -123,10 +124,6 @@ static void _kv_store_async_io_complete(void *arg, const struct spdk_nvme_cpl *c
 	if(status == KV_SUCCESS){
 		kv->value.actual_value_size = kv->value.length;
 	}
-	else{
-		kv->value.length = 0;
-		kv->value.actual_value_size = 0;
-	}
 
         if(kv->param.async_cb) {
                 kv->param.async_cb(kv, result, status);
@@ -213,10 +210,6 @@ int _kv_nvme_store(kv_nvme_t *nvme, kv_pair *kv, int qid, uint8_t is_store) {
 
 	if(io_sequence.status == KV_SUCCESS){
 		kv->value.actual_value_size = kv->value.length;
-	}
-	else{
-		kv->value.length = 0;
-		kv->value.actual_value_size = 0;
 	}
 
         KVNVME_DEBUG("Result of the I/O: %d, Status of the I/O: %d", io_sequence.result, io_sequence.status);
@@ -454,35 +447,34 @@ int _kv_nvme_format(kv_nvme_t *nvme, int ses) {
 
 uint64_t _kv_nvme_get_used_size(kv_nvme_t* nvme) {
         uint32_t sector_size = 0;
-        uint64_t used_size = 0;
+        double utilization = 0;
         const struct spdk_nvme_ns_data *ns_data = NULL;
 
         ENTER();
 
         sector_size = spdk_nvme_ns_get_sector_size(nvme->ns);
-
         if(!sector_size) {
                 KVNVME_ERR("Could not get the Namespace Sector size");
 
                 LEAVE();
-                return used_size;
+                return 0;
         }
 
         ns_data = spdk_nvme_ns_get_data(nvme->ns);
-
         if(!ns_data) {
                 KVNVME_ERR("Could not get the Namespace data");
 
                 LEAVE();
-                return used_size;
+                return 0;
         }
 
-        used_size = ns_data->nuse;
-
-        KVNVME_DEBUG("Used Size of the Device: %.2f", (float)used_size /100);
+        utilization = (1.0 * ns_data->nuse)/ns_data->nsze;
+        KVNVME_DEBUG("Used Size of the Device: %.2f%%", utilization*100);
+        // translat 0% ~100% to value 0 ~10000)
+        utilization = (uint16_t)round(utilization * 10000);
 
         LEAVE();
-        return used_size;
+        return utilization;
 }
 
 int _kv_nvme_exist(kv_nvme_t* nvme, const kv_pair* kv, int qid) {
@@ -696,7 +688,7 @@ int _kv_nvme_iterate_read(kv_nvme_t* nvme, kv_iterate* it, int qid){
 
         if(!it || it->iterator == KV_INVALID_ITERATE_HANDLE || !it->kv.value.value || it->kv.value.length == 0) {
                 KVNVME_ERR("Invalid Parameters passed");
-		if(it->kv.value.value){
+		if(it && it->kv.value.value){
 			it->kv.value.length = 0;
 		}
                 LEAVE();
@@ -788,12 +780,12 @@ int _kv_nvme_iterate_read_async(kv_nvme_t *nvme, kv_iterate* it, int qid){
         ENTER();
 
         if(!it || it->iterator == KV_INVALID_ITERATE_HANDLE || !it->kv.value.value || it->kv.value.length == 0) {
-                KVNVME_ERR("Invalid Parameters passed");
-		if(it->kv.value.value){
-			it->kv.value.length = 0;
-		}
-                LEAVE();
-                return ret;
+            KVNVME_ERR("Invalid Parameters passed");
+            if(it && it->kv.value.value){
+                it->kv.value.length = 0;
+            }
+            LEAVE();
+            return ret;
         }
 
         qpair = nvme->qpairs[qid];

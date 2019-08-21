@@ -65,33 +65,30 @@ void *kv_zalloc(unsigned long long size) {
 }
 
 void *kv_alloc_socket(unsigned long long size, int socket_id) {
-        void* ptr = NULL;
-
-        ptr = spdk_dma_malloc_socket(size, 0, NULL, socket_id);
-
-        if(!ptr) {
-                KVNVME_ERR("Could not allocate the requested memory of size: %lld bytes", size);
-
-                LEAVE();
-                return NULL;
-        }
-
-        return ptr;
+  void* ptr = NULL;
+  if(socket_id < 0 && socket_id != SOCKET_ID_ANY)
+    return NULL;
+  ptr = spdk_dma_malloc_socket(size, 0, NULL, socket_id);
+  if(!ptr) {
+    KVNVME_ERR("Could not allocate the requested memory of size: %lld bytes", size);
+    return NULL;
+  }
+  return ptr;
 }
 
 void *kv_zalloc_socket(unsigned long long size, int socket_id) {
-        void* ptr = NULL;
+  if(socket_id < 0 && socket_id != SOCKET_ID_ANY)
+    return NULL;
+  void* ptr = NULL;
+  ptr = spdk_dma_zmalloc_socket(size, 0, NULL, socket_id);
+  if(!ptr) {
+      KVNVME_ERR("Could not allocate the requested memory of size: %lld bytes", size);
 
-        ptr = spdk_dma_zmalloc_socket(size, 0, NULL, socket_id);
+      LEAVE();
+      return NULL;
+  }
 
-        if(!ptr) {
-                KVNVME_ERR("Could not allocate the requested memory of size: %lld bytes", size);
-
-                LEAVE();
-                return NULL;
-        }
-
-        return ptr;
+  return ptr;
 }
 
 void kv_free(void *ptr) {

@@ -45,7 +45,7 @@
 #define	TRANSPORT_ID_STRING_LEN		19
 #define	BDF_STRING_LEN			13
 
-#define	VENDOR_LOG_ID			0XC0
+#define	VENDOR_LOG_ID			0XCA
 #define	VENDOR_LOG_SIZE			512
 
 #define	CQ_THREAD_DEFAULT_CPU		1 // CPU core 1 (Core number starts with 0)
