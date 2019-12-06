@@ -180,7 +180,7 @@ int iterate_async() {
 		}
 	}
 
-	double waf = kv_nvme_get_waf(handle) / 10;
+	double waf = (double)kv_nvme_get_waf(handle) / 10;
 	if(waf != KV_ERR_INVALID_VALUE){
 		fprintf(stderr, "WAF Before doing I/O: %f\n", waf);
 	}
@@ -390,7 +390,7 @@ int iterate_async() {
 	//NVMe Iterate_Open
 	fprintf(stderr, "kv_nvme_iterate_open:\n");
 	gettimeofday(&start, NULL);
-	uint32_t bitmask = 0xFFFF;
+	uint32_t bitmask = 0xFFFF0000;
 	uint32_t prefix;
 	memcpy(&prefix,kv[0]->key.key,2);
 	uint32_t iterator = KV_INVALID_ITERATE_HANDLE;
@@ -528,7 +528,7 @@ int iterate_async() {
 	fprintf(stderr, "Done\n");
 	show_elapsed_time(&start, &end, "Teardown Memory", insert_count, 0, NULL);
 
-	waf = kv_nvme_get_waf(handle) / 10;
+	waf = (double)kv_nvme_get_waf(handle) / 10;
 	if(waf != KV_ERR_INVALID_VALUE){
 		fprintf(stderr,"WAF After doing I/O: %f\n", waf);
 	}

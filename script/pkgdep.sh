@@ -11,7 +11,7 @@ if [ -s /etc/redhat-release ]; then
 	fi
 	yum install -y gcc gcc-c++ make CUnit-devel libaio-devel openssl-devel \
 		git astyle-devel python-pep8 lcov python clang-analyzer libuuid-devel \
-		sg3_utils libiscsi-devel
+		sg3_utils libiscsi-devel subunit-devel
 	# Additional dependencies for NVMe over Fabrics
 	yum install -y libibverbs-devel librdmacm-devel
 	# Additional dependencies for DPDK
@@ -29,7 +29,7 @@ elif [ -f /etc/debian_version ]; then
 	# Includes Ubuntu, Debian
 	# Retrieve new lists of packages
 	apt-get update
-	apt-get install -y gcc g++ make libcunit1-dev libaio-dev libssl-dev \
+	apt-get install -y gcc g++ make libcunit1-dev libaio-dev libssl-dev libsubunit-dev\
 		git astyle pep8 lcov clang uuid-dev sg3-utils libiscsi-dev libgflags-dev
 	# Additional dependencies for NVMe over Fabrics
 	apt-get install -y libibverbs-dev librdmacm-dev

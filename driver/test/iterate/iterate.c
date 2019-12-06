@@ -122,7 +122,7 @@ int iterate() {
 		}
 	}
 
-	waf = kv_nvme_get_waf(handle) / 10;
+	waf = (double)kv_nvme_get_waf(handle) / 10;
 	fprintf(stderr, "WAF Before doing I/O: %f\n", waf);
 
 	kv_pair** kv = (kv_pair**)malloc(sizeof(kv_pair*) * insert_count);
@@ -138,8 +138,15 @@ int iterate() {
 		}
 
 		kv[i] = (kv_pair*)malloc(sizeof(kv_pair));
-		if(!kv[i])
+		if(!kv[i]){
+			for(int j = 0 ; j < i ; j++){
+                free(kv[j]);
+                kv[j] = NULL;
+            }
+            free(kv);
+            kv = NULL;
 			return -ENOMEM;
+		}
 
 		kv[i]->keyspace_id = KV_KEYSPACE_IODATA;
 		int key_buffer_size = key_length;
@@ -147,14 +154,28 @@ int iterate() {
 			key_buffer_size += (4-key_length%4);
 		}
 		kv[i]->key.key = kv_zalloc(key_buffer_size);
-		if(!kv[i]->key.key)
-			return -ENOMEM;
+		if(!kv[i]->key.key){
+			for(int j = 0 ; j <= i ; j++){
+                free(kv[j]);
+                kv[j] = NULL;
+            }
+            free(kv);
+            kv = NULL;
+            return -ENOMEM;
+		}
 		memcpy(kv[i]->key.key + ((size_t)key_length > sizeof(int) ? (key_length - sizeof(i)) : 0), &i, MIN((size_t)key_length, sizeof(int)));
 		kv[i]->key.length = key_length;
 
 		kv[i]->value.value = kv_zalloc(value_size);
-		if(!kv[i]->value.value)
-			return -ENOMEM;
+		if(!kv[i]->value.value){
+            for(int j = 0 ; j <= i ; j++){
+                free(kv[j]);
+                kv[j] = NULL;
+            }
+            free(kv);
+            kv = NULL;
+            return -ENOMEM;
+		}
 		kv[i]->value.length = value_size;
 		kv[i]->value.offset = 0;
 		memset(kv[i]->value.value, 'a'+(i % 26), value_size);
@@ -237,7 +258,7 @@ int iterate() {
 	//TODO : option
 	//Iterate
 	fprintf(stderr, "Iterate Open\n");
-	uint32_t bitmask = 0xFFFF;
+	uint32_t bitmask = 0xFFFF0000;
 	//uint32_t prefix = 0x1234;
 	uint32_t prefix;
 	memcpy(&prefix,kv[0]->key.key,2);
@@ -314,7 +335,7 @@ int iterate() {
 	gettimeofday(&end, NULL);
 	show_elapsed_time(&start, &end, "Teardown Memory", insert_count, 0, NULL);
 
-	waf = kv_nvme_get_waf(handle) / 10;
+	waf = (double)kv_nvme_get_waf(handle) / 10;
 	fprintf(stderr, "WAF After doing I/O: %f\n", waf);
 
 	//Init Cache

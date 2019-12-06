@@ -164,7 +164,7 @@ int log_loggable(int level){
 	return 1;
 }
 
-void _log(const char *file, int line, int panic, const char *fmt, ...){
+void _log_internal(const char *file, int line, int panic, const char *fmt, ...){
 	struct logger *l = &logger;
 	int len, size, errno_save;
 	char buf[KV_LOG_MAX_LEN], *timestr;
@@ -206,7 +206,7 @@ void _log(const char *file, int line, int panic, const char *fmt, ...){
 	}
 }
 
-void _log_stderr(const char *fmt, ...){
+void _log_stderr_internal(const char *fmt, ...){
 	struct logger *l = &logger;
 	int len, size, errno_save;
 	char buf[4 * KV_LOG_MAX_LEN];
@@ -235,7 +235,7 @@ void _log_stderr(const char *fmt, ...){
  * Hexadecimal dump in the canonical hex + ascii display
  * See -C option in man hexdump
  */
-void _log_hexdump(const char *file, int line, char *data, int datalen, const char *fmt, ...){
+void _log_hexdump_internal(const char *file, int line, char *data, int datalen, const char *fmt, ...){
 	struct logger *l = &logger;
 	char buf[8 * KV_LOG_MAX_LEN];
 	int i, off, len, size, errno_save;
@@ -248,7 +248,7 @@ void _log_hexdump(const char *file, int line, char *data, int datalen, const cha
 
 	/* log format */
 	va_start(args, fmt);
-	_log(file, line, 0, fmt);
+	_log_internal(file, line, 0, fmt);
 	va_end(args);
 
 	/* log hexdump */

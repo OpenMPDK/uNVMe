@@ -92,14 +92,17 @@ static void _kv_retrieve_async_io_complete(void *arg, const struct spdk_nvme_cpl
 
         KVNVME_DEBUG("Status of the Async I/O: %d, Result of the Async I/O: %d, kv->key.key: %s", status, result, (char *)kv->key.key);
 
-	if(status == KV_SUCCESS){
-		kv->value.length = spdk_min(kv->value.length,result);
-		kv->value.actual_value_size = result;
-	}
-	else{
-		kv->value.length = 0;
-		kv->value.actual_value_size = 0;
-	}
+        if(status == KV_SUCCESS){
+          //result is the total value length that returned from ssd, 
+          //remain value length = result - offset, user inputted buffer length may
+          //big or little than remain_val_len
+          kv->value.actual_value_size = result - kv->value.offset;
+          kv->value.length = spdk_min(kv->value.length, kv->value.actual_value_size);
+        }
+        else{
+          kv->value.length = 0;
+          kv->value.actual_value_size = 0;
+        }
 
         if(kv->param.async_cb) {
                 kv->param.async_cb(kv, result, status);
@@ -259,6 +262,11 @@ int _kv_nvme_retrieve(kv_nvme_t *nvme, kv_pair *kv, int qid) {
                 LEAVE();
                 return ret;
         }
+        if (kv->value.length & (KV_VALUE_LENGTH_ALIGNMENT_UNIT - 1))
+          return KV_ERR_MISALIGNED_VALUE_SIZE;
+        if (kv->value.offset & (KV_ALIGNMENT_UNIT - 1)) {
+          return KV_ERR_MISALIGNED_VALUE_OFFSET;
+        }
 
         qpair = nvme->qpairs[qid];
 
@@ -292,14 +300,14 @@ int _kv_nvme_retrieve(kv_nvme_t *nvme, kv_pair *kv, int qid) {
 
         KVNVME_DEBUG("Result of the I/O: %d, Status of the I/O: %d", io_sequence.result, io_sequence.status);
 
-	if(io_sequence.status == KV_SUCCESS){
-		kv->value.length = spdk_min(kv->value.length,io_sequence.result);
-		kv->value.actual_value_size = io_sequence.result;
-	}
-	else{
-		kv->value.length = 0;
-		kv->value.actual_value_size = 0;
-	}
+        if(io_sequence.status == KV_SUCCESS){
+          kv->value.actual_value_size = io_sequence.result - kv->value.offset;
+          kv->value.length = spdk_min(kv->value.length, kv->value.actual_value_size);
+        }
+        else{
+          kv->value.length = 0;
+          kv->value.actual_value_size = 0;
+        }
 
         LEAVE();
         return io_sequence.status;
@@ -315,6 +323,11 @@ int _kv_nvme_retrieve_async(kv_nvme_t *nvme, kv_pair *kv, int qid) {
                 KVNVME_ERR("Invalid Parameters passed");
                 LEAVE();
                 return ret;
+        }
+        if (kv->value.length & (KV_VALUE_LENGTH_ALIGNMENT_UNIT- 1))
+          return KV_ERR_MISALIGNED_VALUE_SIZE;
+        if(kv->value.offset & (KV_ALIGNMENT_UNIT - 1)) {
+          return KV_ERR_MISALIGNED_VALUE_OFFSET;
         }
 
         qpair = nvme->qpairs[qid];
@@ -872,6 +885,12 @@ int kv_nvme_iterate_info(uint64_t handle, kv_iterate_handle_info* info, int nr_h
 
                 info[i].prefix = (*(uint32_t*)(logbuf + offset + 4));
                 info[i].bitmask = (*(uint32_t*)(logbuf + offset + 8));
+                /* The bitpattern of the KV API is of big-endian mode. 
+                   If the CPU is of little-endian mode, 
+                   the bit pattern and bit mask should be transformed.  */
+                info[i].prefix = htobe32(info[i].prefix);
+                info[i].bitmask = htobe32(info[i].bitmask);
+
 		info[i].is_eof = (*(uint8_t*)(logbuf + offset + 12));
                 info[i].reserved[0] = (*(uint8_t*)(logbuf + offset + 13));
                 info[i].reserved[1] = (*(uint8_t*)(logbuf + offset + 14));

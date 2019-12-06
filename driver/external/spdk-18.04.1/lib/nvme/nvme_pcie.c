@@ -995,7 +995,7 @@ nvme_pcie_qpair_construct(struct spdk_nvme_qpair *qpair)
 		num_trackers = pqpair->num_entries - 1;
 	}
 
-	SPDK_INFOLOG(SPDK_LOG_NVME, "max_completions_cap = %" PRIu16 " num_trackers = %" PRIu16 "\n",
+	SPDK_DEBUGLOG(SPDK_LOG_NVME, "max_completions_cap = %" PRIu16 " num_trackers = %" PRIu16 "\n",
 		     pqpair->max_completions_cap, num_trackers);
 
 	assert(num_trackers != 0);
@@ -1046,7 +1046,7 @@ nvme_pcie_qpair_construct(struct spdk_nvme_qpair *qpair)
 	}
 
 	uint32_t total_prp_buffer_size = spdk_align32pow2(num_trackers * sizeof(struct nvme_tracker_dptr));
-	SPDK_NOTICELOG("q[%d] prp_buffer_size=%d\n",pqpair->qpair.id, total_prp_buffer_size);
+	SPDK_DEBUGLOG("q[%d] prp_buffer_size=%d\n",pqpair->qpair.id, total_prp_buffer_size);
 	struct nvme_tracker_dptr* tr_dptr = spdk_dma_zmalloc(total_prp_buffer_size, total_prp_buffer_size, &phys_addr);
 	if (tr_dptr == NULL) {
 		SPDK_ERRLOG("tr_dptr failed\n");

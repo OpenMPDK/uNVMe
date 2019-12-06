@@ -48,7 +48,6 @@ uint32_t _kv_nvme_iterate_open(kv_nvme_t *nvme, const uint8_t keyspace_id, const
 int _kv_nvme_iterate_close(kv_nvme_t *nvme, const uint8_t iterator, int qid);
 int _kv_nvme_iterate_read(kv_nvme_t* nvme, kv_iterate* it, int qid);
 int _kv_nvme_iterate_read_async(kv_nvme_t *nvme, kv_iterate* it, int qid);
-
 #endif
 
 

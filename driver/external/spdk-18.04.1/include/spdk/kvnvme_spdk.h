@@ -241,7 +241,7 @@ spdk_nvme_kv_cmd_iterate_read (struct spdk_nvme_ns *ns, struct spdk_nvme_qpair *
 			      uint8_t iterator, void* buffer, uint32_t buffer_length, uint32_t buffer_offset,
 			      spdk_nvme_cmd_cb cb_fn, void *cb_arg,
 		              uint32_t io_flags, uint8_t  option);
- 
+
 /**
  * \brief Submits a KV Iterate I/O to the specified NVMe namespace.
  *
@@ -267,7 +267,7 @@ spdk_nvme_kv_cmd_iterate_close (struct spdk_nvme_ns *ns, struct spdk_nvme_qpair 
 			      uint8_t iterator,
 			      spdk_nvme_cmd_cb cb_fn, void *cb_arg,
 		              uint32_t io_flags, uint8_t  option);
- 
+
 /**
  * \brief Submits a KV Iterate I/O to the specified NVMe namespace.
  * \param ns NVMe namespace to submit the KV Iterate I/O

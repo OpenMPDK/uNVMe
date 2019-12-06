@@ -83,7 +83,8 @@ typedef struct{
 
 void generate_key(char* key, int key_length, uint32_t prefix, int idx){
 	snprintf(key, key_length+1, KEY_FORMAT, idx);
-	memcpy(key, &prefix, PREFIX_LENGTH); //change low 4B to the prefix
+	prefix = htobe32(prefix);
+        memcpy(key, &prefix, PREFIX_LENGTH); //change low 4B to the prefix
 }
 
 int get_key_idx(char* origin_key){
@@ -102,6 +103,7 @@ int validate_iterate_read(uint8_t* key_exist, kv_iterate* it, int key_length, ui
         int idx = 0;
         int num_keys = 0;
 
+        prefix = htobe32(prefix);
         if (type == KV_KEY_ITERATE) {
                 char* key_buf = (char*)it->kv.value.value;
                 int key_buf_length = (int)it->kv.value.length;

@@ -132,9 +132,6 @@ _nvme_kv_cmd_setup_retrieve_request(struct spdk_nvme_ns *ns, struct nvme_request
 
         cmd = &req->cmd;
         cmd->cdw10 = buffer_size / 4; // In DWORDs
-	if(buffer_size > 0 && buffer_size%4){ //Note: to support byte unit IO. host has to allocate 4B aligned buffer,
-		cmd->cdw10++;
-	}
 
 	// cdw11:
 	// 2017.10.25 : for large value append / retrieve

@@ -70,7 +70,7 @@ static bool probe_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid, st
                 opts->io_queue_requests = DEFAULT_IO_QUEUE_DEPTH;
         }
 
-        KVNVME_INFO("I/O Queue Depth: %d", opts->io_queue_size-1);
+        KVNVME_DEBUG("I/O Queue Depth: %d", opts->io_queue_size-1);
 
         LEAVE();
         return true;
@@ -126,11 +126,11 @@ static void spdk_aer_cb_fn(void *aer_cb_arg, const struct spdk_nvme_cpl *cpl) {
 
         if(nvme) {
                 if(nvme->aer_cb_fn) {
-                        KVNVME_INFO("Triggering Application's AER Callback Function");
+                        KVNVME_DEBUG("Triggering Application's AER Callback Function");
 
                         nvme->aer_cb_fn(nvme->aer_cb_arg, cpl->cdw0, (unsigned int)cpl->status.sc);
 
-                        KVNVME_INFO("Triggered Application's AER Callback Function");
+                        KVNVME_DEBUG("Triggered Application's AER Callback Function");
                 }
         }
 
@@ -189,7 +189,7 @@ static void kv_nvme_remove_socket(void){
 	}
 	sprintf(cmd, "rm -rf %s/dpdk/%s", directory, spdk_prefix);
 	int ret = system(cmd);
-	KVNVME_INFO("remove socket info: %d\n", ret);
+	KVNVME_DEBUG("remove socket info: %d\n", ret);
 }
 
 int _kv_env_init(uint32_t process_mem_size_mb, struct spdk_env_opts* opts){
@@ -197,7 +197,7 @@ int _kv_env_init(uint32_t process_mem_size_mb, struct spdk_env_opts* opts){
 
         pthread_mutex_lock(&g_init_mutex);
         if(g_kvdd_ref_count++ > 0){
-                KVNVME_INFO("KV DD is already initialized\n");
+                KVNVME_DEBUG("KV DD is already initialized\n");
                 pthread_mutex_unlock(&g_init_mutex);
                 return KV_SUCCESS;
         }
@@ -205,7 +205,7 @@ int _kv_env_init(uint32_t process_mem_size_mb, struct spdk_env_opts* opts){
 
 	if(opts){
 		ret = spdk_env_init(opts);
-		KVNVME_INFO("mem_size_mb: %u shm_id: %u\n",opts->mem_size, opts->shm_id);
+		KVNVME_DEBUG("mem_size_mb: %u shm_id: %u\n",opts->mem_size, opts->shm_id);
 	}
 	else{
 		struct spdk_env_opts local_opts;
@@ -214,7 +214,7 @@ int _kv_env_init(uint32_t process_mem_size_mb, struct spdk_env_opts* opts){
 		local_opts.mem_size = process_mem_size_mb;
 		local_opts.shm_id = getpid();
 		ret = spdk_env_init(&local_opts);
-		KVNVME_INFO("mem_size_mb: %u shm_id: %u\n",local_opts.mem_size, local_opts.shm_id);
+		KVNVME_DEBUG("mem_size_mb: %u shm_id: %u\n",local_opts.mem_size, local_opts.shm_id);
 	}
 
 	if(ret) {
@@ -222,7 +222,7 @@ int _kv_env_init(uint32_t process_mem_size_mb, struct spdk_env_opts* opts){
 		return ret;
 	}
 
-        KVNVME_INFO("Initialized the KV API Environment");
+        KVNVME_DEBUG("Initialized the KV API Environment");
 
         ENTER();
 /*
@@ -244,7 +244,7 @@ int _kv_env_init(uint32_t process_mem_size_mb, struct spdk_env_opts* opts){
 
         pthread_setname_np(g_aer_thread, "AERs Processing Thread");
 
-        KVNVME_ERR("Done\n");
+        KVNVME_DEBUG("Done\n");
         LEAVE();
 
         return ret;
@@ -438,7 +438,7 @@ int kv_nvme_init(const char *bdf, kv_nvme_io_options *options, unsigned int ssd_
                 return ret;
         }
 
-        KVNVME_INFO("core_mask: 0x%llx, sync_mask: 0x%llx, num_cq_threads: 0x%llx, cq_thread_mask: 0x%llx",
+        KVNVME_DEBUG("core_mask: 0x%llx, sync_mask: 0x%llx, num_cq_threads: 0x%llx, cq_thread_mask: 0x%llx",
                         (long long unsigned int) options->core_mask, (long long unsigned int) options->sync_mask,
                         (long long unsigned int) options->num_cq_threads, (long long unsigned int) options->cq_thread_mask);
 
@@ -597,7 +597,7 @@ int kv_nvme_init(const char *bdf, kv_nvme_io_options *options, unsigned int ssd_
                 num_cq_threads = options->num_cq_threads;
                 cq_thread_mask = options->cq_thread_mask;
 
-                KVNVME_INFO("No. of CQ Threads : %llu, No. of Async I/O Queues: %llu", num_cq_threads, num_async_queues);
+                KVNVME_DEBUG("No. of CQ Threads : %llu, No. of Async I/O Queues: %llu", num_cq_threads, num_async_queues);
 
 /*
                 if(num_cq_threads > num_async_queues) {
@@ -756,7 +756,7 @@ int kv_nvme_init(const char *bdf, kv_nvme_io_options *options, unsigned int ssd_
                 }
 
                 for(thread_id = 0; thread_id < num_cq_threads; thread_id++) {
-                        KVNVME_INFO("Queues for Thread %d : %d", thread_id, queues_per_thread[thread_id]);
+                        KVNVME_DEBUG("Queues for Thread %d : %d", thread_id, queues_per_thread[thread_id]);
                 }
 
                 unsigned int async_qpair_start_index = 0;
@@ -846,6 +846,7 @@ int kv_nvme_init(const char *bdf, kv_nvme_io_options *options, unsigned int ssd_
                 }
 
                 free(queues_per_thread);
+                free(cq_thread_args);
         }
 
         LEAVE();

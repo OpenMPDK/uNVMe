@@ -72,6 +72,7 @@ typedef struct{
 
 void generate_key(char* key, int key_length, uint32_t prefix, int idx){
 	snprintf(key, key_length+1, KEY_FORMAT, idx);
+        prefix = htobe32(prefix);
 	memcpy(key, &prefix, PREFIX_LENGTH); //change low 4B to the prefix
 }
 
@@ -90,8 +91,9 @@ int validate_iterate_read(uint8_t* key_exist, kv_iterate* it, int key_length, ui
 	char* cur_key;
 	int idx = 0;
 	int num_keys = 0;
-
-	if (type == KV_KEY_ITERATE) {
+        prefix = htobe32(prefix);
+	
+        if (type == KV_KEY_ITERATE) {
 		char* key_buf = (char*)it->kv.value.value;
 		int key_buf_length = (int)it->kv.value.length;
 		if (!key_buf_length) {
@@ -99,7 +101,6 @@ int validate_iterate_read(uint8_t* key_exist, kv_iterate* it, int key_length, ui
 		}
 
 		memcpy(&num_keys, key_buf, KV_ITERATE_READ_BUFFER_OFFSET);
-
 		key_buf += KV_ITERATE_READ_BUFFER_OFFSET;
 		for(int i = 0; i < num_keys; i++){
 			int cur_key_length;
@@ -107,7 +108,7 @@ int validate_iterate_read(uint8_t* key_exist, kv_iterate* it, int key_length, ui
 			assert(cur_key_length == key_length);
 
 			cur_key = key_buf + KV_ITERATE_READ_BUFFER_OFFSET;
-			assert(memcmp(cur_key, &prefix, PREFIX_LENGTH) == 0);
+                        assert(memcmp(cur_key, &prefix, PREFIX_LENGTH) == 0);
 			idx = get_key_idx(cur_key);
 			if (key_exist[idx]) {
 				printf("(key only it)duplicated key upcoming: prefix=0x%x, key=%u(%u)\n", prefix, idx, key_exist[idx]+1);
@@ -333,7 +334,7 @@ void test_iterate_open_max_handles(uint64_t handle){
 void test_store(uint64_t handle, uint32_t prefix, kv_pair** kv, int key_length, int value_length, int test_cnt){
         fprintf(stderr, "  Store...");
 	int test_value_length;
-
+       
         for(int i = 0; i < test_cnt; i++){
                 DISPLAY_CNT(i);
 		test_value_length = TEST_VALUE_LENGTH(value_length, i); //4KB, 3KB, 2KB, 4KB, 3KB, ..
@@ -385,7 +386,7 @@ void test_iterate_read(uint64_t handle, uint32_t prefix, int key_length, int val
         int iterate_buffer_size;
         kv_iterate* it;
 	uint8_t* key_exist;
-
+ 
         iterator = kv_iterate_open(handle, keyspace_id, bitmask, prefix, type);
 	assert(iterator != KV_INVALID_ITERATE_HANDLE && iterator <= KV_MAX_ITERATE_HANDLE);
 	iterate_buffer_size = KV_ITERATE_READ_BUFFER_SIZE; //32KB
@@ -413,7 +414,7 @@ void test_iterate_read(uint64_t handle, uint32_t prefix, int key_length, int val
                 iterate_read_key_cnt += validate_iterate_read(key_exist, it, key_length, prefix, type);
         }while(ret == KV_SUCCESS);
 	assert(ret == KV_ERR_ITERATE_READ_EOF);
-	assert(iterate_read_key_cnt == test_cnt);
+        assert(iterate_read_key_cnt == test_cnt);
 
         assert(kv_iterate_close(handle, iterator) == KV_SUCCESS);
 

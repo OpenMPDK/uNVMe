@@ -645,7 +645,10 @@ uint32_t kv_nvme_iterate_open(uint64_t handle, uint8_t keyspace_id, uint32_t bit
 		KVNVME_WARN("Could not get the CPU Core ID, Using Default 0");
 		qid = 0;
 	}
-
+ 
+        /* Convert bitmask and bit_pattern endian to big endian when cpu is little endian  */
+        bitmask = htobe32(bitmask);
+	prefix = htobe32(prefix);
 	if(nvme->dev_ops.iterate_open) {
 		iterator = nvme->dev_ops.iterate_open(nvme, keyspace_id, bitmask, prefix, iterate_type, qid);
 		LEAVE();
@@ -951,6 +954,7 @@ uint64_t kv_nvme_get_waf(uint64_t handle) {
 
 	ret = kv_nvme_get_log_page(handle, VENDOR_LOG_ID, log_buffer,  VENDOR_LOG_SIZE);
 	if(ret == KV_SUCCESS){
+    // const uint32_t waf_val = *((uint32_t *)&data[256]);
 		waf = *((uint32_t *)&log_buffer[256]);
 	}
 

@@ -47,63 +47,61 @@ void log_level_down(void);
 void log_level_set(int level);
 void log_reopen(void);
 int log_loggable(int level);
-void _log(const char *file, int line, int panic, const char *fmt, ...);
-void _log_stderr(const char *fmt, ...);
-void _log_hexdump(const char *file, int line, char *data, int datalen, const char *fmt, ...);
+void _log_internal(const char *file, int line, int panic, const char *fmt, ...);
+void _log_stderr_internal(const char *fmt, ...);
+void _log_hexdump_internal(const char *file, int line, char *data, int data_len, const char *fmt, ...);
 
 /*
- * log_stderr   - log to stderr
- * loga         - log always
- * loga_hexdump - log hexdump always
- * log_error    - error log messages
- * log_warn     - warning log messages
- * log_panic    - log messages followed by a panic
+ * log_debug         - debug log messages based on a log level
+ * log_hexdump    - hexadump -C of a log buffer
+ * log_stderr         - log to stderr
+ * loga                  - log always
+ * loga_hexdump  - log hexdump always
+ * log_error          - error log messages
+ * log_panic          - log messages followed by a panic
  * ...
- * log_debug    - debug log messages based on a log level
- * log_hexdump  - hexadump -C of a log buffer
  */
-#define log_debug(_level, ...) do {                                         \
-	if (log_loggable(_level) != 0) {                                        \
-		_log(__FILE__, __LINE__, 0, __VA_ARGS__);                           \
-	}                                                                       \
-} while (0)
+#define log_debug(_level, ...) do {                                      \
+  if (log_loggable(_level) != 0) {                                       \
+    _log_internal(__FILE__, __LINE__, 0, __VA_ARGS__);                   \
+  }                                                                      \
+} while (0);
 
-#define log_hexdump(_level, _data, _datalen, ...) do {                      \
-	if (log_loggable(_level) != 0) {                                        \
-		_log_hexdump(__FILE__, __LINE__, (char *)(_data), (int)(_datalen),  \
-				__VA_ARGS__);                                          \
-	}                                                                       \
-} while (0)
+#define log_hexdump(_level, _data, _data_len, ...) do {                  \
+   if (log_loggable(_level) != 0) {                                      \
+    _log_hexdump_internal(__FILE__, __LINE__, (char *)(_data), (int)(_data_len), __VA_ARGS__);           \
+  }                                                                      \
+} while (0);
 
-#define log_stderr(...) do {                                                \
-	_log_stderr(__VA_ARGS__);                                               \
-} while (0)
+#define log_stderr(...) do {                                             \
+  _log_stderr_internal(__VA_ARGS__);                                     \
+} while (0);
 
-#define loga(...) do {                                                      \
-	_log(__FILE__, __LINE__, 0, __VA_ARGS__);                               \
-} while (0)
+#define loga(...) do {                                                   \
+  _log_internal(__FILE__, __LINE__, 0, __VA_ARGS__);                     \
+} while (0);
 
-#define loga_hexdump(_data, _datalen, ...) do {                             \
-	_log_hexdump(__FILE__, __LINE__, (char *)(_data), (int)(_datalen),      \
-			__VA_ARGS__);                                              \
-} while (0)                                                                 \
+#define loga_hexdump(_data, _data_len, ...) do {                         \
+  _log_hexdump_internal(__FILE__, __LINE__, (char *)(_data),             \
+    (int)(_data_len), __VA_ARGS__);                                       \
+} while (0);                                                             \
 
-#define log_error(...) do {                                                 \
-	if (log_loggable(KV_LOG_ERR) != 0) {                                     \
-		_log(__FILE__, __LINE__, 0, __VA_ARGS__);                           \
-	}                                                                       \
-} while (0)
+#define log_error(...) do {                                              \
+  if (log_loggable(KV_LOG_ERR) != 0) {                                   \
+    _log_internal(__FILE__, __LINE__, 0, __VA_ARGS__);                   \
+  }                                                                      \
+} while (0);
 
-//#define log_warn(...) do {                                                  \
-//    if (log_loggable(LOG_WARN) != 0) {                                      \
-//        _log(__FILE__, __LINE__, 0, __VA_ARGS__);                           \
-//    }                                                                       \
-//} while (0)
+//#define log_warn(...) do {                                                                                         \
+//    if (log_loggable(LOG_WARN) != 0) {                                                                      \
+//        _log(__FILE__, __LINE__, 0, __VA_ARGS__);                                                     \
+//    }                                                                                                                            \
+//} while (0);
 
-#define log_panic(...) do {                                                 \
-	if (log_loggable(KV_LOG_EMERG) != 0) {                                     \
-		_log(__FILE__, __LINE__, 1, __VA_ARGS__);                           \
-	}                                                                       \
-} while (0)
+#define log_panic(...) do {                                               \
+  if (log_loggable(KV_LOG_EMERG) != 0) {                                  \
+    _log_internal(__FILE__, __LINE__, 1, __VA_ARGS__);                    \
+  }                                                                       \
+} while (0);
 
 #endif

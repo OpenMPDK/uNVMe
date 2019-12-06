@@ -121,12 +121,13 @@ int ut() {
 		}
 	}
 
-        waf = kv_nvme_get_waf(handle) / 10;
+        waf = (double)kv_nvme_get_waf(handle) / 10;
         printf("WAF Before doing I/O: %f\n", waf);
 	
 	kv_pair** kv = (kv_pair**)malloc(sizeof(kv_pair*) * insert_count);
-	if(!kv)
+	if(!kv){
 		return -ENOMEM;
+	}
 
 	//Prepare App Memory 
 	gettimeofday(&start, NULL);
@@ -136,19 +137,40 @@ int ut() {
 		}
 
 		kv[i] = (kv_pair*)malloc(sizeof(kv_pair));
-		if(!kv[i])
+		if(!kv[i]){
+			for(int j = 0 ; j < i; j++){
+                free(kv[j]);
+                kv[j] = NULL;
+            }
+            free(kv);
+            kv = NULL;
 			return -ENOMEM;
+		}
 
 		kv[i]->keyspace_id = KV_KEYSPACE_IODATA;
 		kv[i]->key.key = malloc(key_length + 1);
-		if(!kv[i]->key.key)
+		if(!kv[i]->key.key){
+			for(int j = 0 ; j <= i; j++){
+                free(kv[j]);
+                kv[j] = NULL;
+            }
+            free(kv);
+            kv = NULL;
 			return -ENOMEM;
+		}
 		kv[i]->key.length = key_length;
 		sprintf(kv[i]->key.key, "mountain%08x", i);
 
 		kv[i]->value.value = kv_zalloc(value_size);
-		if(!kv[i]->value.value)
-			return -ENOMEM;
+		if(!kv[i]->value.value){
+            for(int j = 0 ; j <= i ; j++){
+                free(kv[j]);
+                kv[j] = NULL;
+            }
+            free(kv);
+            kv = NULL;
+            return -ENOMEM;
+		}
 		kv[i]->value.length = value_size;
 		kv[i]->value.offset = 0;
 		memset(kv[i]->value.value, 'a'+(i % 26), value_size);
@@ -281,7 +303,7 @@ int ut() {
 	gettimeofday(&end, NULL);
 	show_elapsed_time(&start, &end, "Teardown Memory", insert_count, 0, NULL);
 
-        waf = kv_nvme_get_waf(handle) / 10;
+        waf = (double)kv_nvme_get_waf(handle) / 10;
         printf("WAF After doing I/O: %f\n", waf);
 
 	//Init Cache

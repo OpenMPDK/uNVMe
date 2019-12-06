@@ -59,6 +59,8 @@
 #define KV_MIN_KEY_LEN 4
 #define KV_MAX_KEY_LEN 255
 #define KV_ITERATE_READ_BUFFER_OFFSET 4
+#define KV_ALIGNMENT_UNIT (512) /*value of KV_ALIGNMENT_UNIT must be a power of 2 currently*/
+#define KV_VALUE_LENGTH_ALIGNMENT_UNIT 4 /*value of KV_VALUE_LENGTH_ALIGNMENT_UNITmust be a power of 2 currently */
 
 #define KV_ITERATE_READ_BUFFER_SIZE (32*1024) //32KB
 #define KV_MAX_ITERATE_HANDLE 16	//maximum 4 handles
@@ -187,7 +189,7 @@ enum kv_keyspace_id {
 enum kv_iterate_read_option {		
 	KV_ITERATE_READ_DEFAULT = 0x00,			/**<  [DEFAULT] default operation for command */
 };
-		
+
 /**
  * @brief options used for store operation
  */
