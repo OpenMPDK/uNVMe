@@ -519,11 +519,11 @@ int _kv_nvme_exist(kv_nvme_t* nvme, const kv_pair* kv, int qid) {
                 LEAVE();
                 return ret;
         }
-        pthread_spin_unlock(&qpair->sq_lock);
 
         while(!io_sequence.is_completed) {
                 spdk_nvme_qpair_process_completions(qpair, 0);
         }
+        pthread_spin_unlock(&qpair->sq_lock);
 
         //KVNVME_ERR("Result of the I/O: %d, Status of the I/O: %d", io_sequence.result, io_sequence.status);
 
